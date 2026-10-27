@@ -1,0 +1,8 @@
+# Normalize text files; bash scripts must keep LF line endings even when Git for Windows
+# checks them out with autocrlf, or MSYS2 bash fails on the carriage returns.
+* text=auto
+*.sh text eol=lf
+*.c text
+*.h text
+*.png binary
+*.ico binary

@@ -1,0 +1,36 @@
+# module|product|affected-range|fixed-in|source-url
+# Verified 2026-10-23 against vendor/primary pages. Lines starting with # and blank lines are ignored.
+#
+# affected-range grammar (machine-parsed by src/advisory.c):
+#   alternatives separated by ';'  (affected if ANY alternative matches)
+#   an alternative = constraints separated by spaces (ALL must hold)
+#   constraint = op version, op in >= > <= < == =   e.g. ">=19.0 <19.0.10"
+#   '*' = every version, '-' = not a version rule (fixed-in column then carries match data)
+# fixed-in is free text for humans, except for non-version rules ('-') where it is the match data.
+# Banner/version matches are WEAK signals: distros backport fixes without changing the version.
+
+# PHP2Shell: CVE-2026-109618 + CVE-2026-109619 (CVSS v4 9.2, exploited in the wild). Branches 5.4-8.1 are EOL and affected.
+http|php|<8.2.35; >=8.3 <8.3.36; >=8.4 <8.4.27; >=8.5 <8.5.12|8.2.35,8.3.36,8.4.27,8.5.12|https://github.com/php/php-src/security/advisories/GHSA-w8hw-w9fx-j79w
+http|php|<8.2.35; >=8.3 <8.3.36; >=8.4 <8.4.27; >=8.5 <8.5.12|8.2.35,8.3.36,8.4.27,8.5.12|https://github.com/php/php-src/security/advisories/GHSA-6wmf-4rv5-p3rp
+
+# GitLab CE/EE CVE-2026-110264 (CVSS 10.0, unauthenticated RCE). Self-managed only.
+http|gitlab|<18.11.13; >=19.0 <19.0.10; >=19.1 <19.1.9; >=19.2 <19.2.9; >=19.3 <19.3.6; >=19.4 <19.4.3; >=19.5 <19.5.1|18.11.13,19.0.10,19.1.9,19.2.9,19.3.6,19.4.3,19.5.1|https://docs.gitlab.com/releases/patches/patch-release-gitlab-19-5-1-released/
+
+# LiteLLM: only 1.107.0 is malicious (PyPI wheels + Docker/GHCR tags). Safe pin 1.106.2.
+py|litellm|==1.107.0|1.106.2 (any earlier)|https://docs.litellm.ai/blog/security-incident-oct-21-2026
+# IOC files inside site-packages (fixed-in column = ';'-separated file names)
+pyioc|litellm|-|cook.pth;cook.py|https://docs.litellm.ai/blog/security-incident-oct-21-2026
+
+# Node.js 2026-10-21 security release (4 High). EOL lines (<=23, 25) are also affected.
+http|node|<22.23.4; >=23 <24.22.1; >=25 <26.12.1|22.23.4,24.22.1,26.12.1|https://nodejs.org/en/blog/vulnerability/october-2026-security-releases
+
+# nginx: two "Major" 2026 CVEs listed on nginx.org.
+# Newest listed (medium) fixes are 1.31.7 / 1.30.6, so recommending >= those is sensible.
+http|nginx|>=0.9.6 <1.30.4; >=1.31.0 <1.31.3|1.31.3,1.30.4 (CVE-2026-42533)|https://nginx.org/en/security_advisories.html
+http|nginx|>=1.31.0 <1.31.2|1.31.2 (CVE-2026-42530)|https://nginx.org/en/security_advisories.html
+
+# eMudhra: 8 intermediate CA keys compromised (CVE-2026-111943). Root: emSign ECC Root CA - G3.
+# SPKI hashes were NOT in the sources fetched: do not hardcode; supply via data/spki_blocklist.txt (CCADB / Chromium CRLSet).
+# fixed-in column = ';'-separated case-insensitive substrings to look for in issuer/subject names.
+tls|issuer-name|-|eMudhra;emSign|https://blog.google/security/protecting-chrome-and-android-users-from-compromised-emudhra-intermediate-ca-certificates/
+

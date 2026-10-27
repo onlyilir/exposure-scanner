@@ -1,0 +1,11 @@
+# build output (the installer is published as a GitHub Release, not committed)
+*.exe
+*.o
+release/
+san_*
+
+# local working files
+HANDOVER.md
+reports/
+tmp_*
+*.log

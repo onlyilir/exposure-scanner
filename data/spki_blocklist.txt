@@ -1,0 +1,7 @@
+# SPKI SHA-256 blocklist for `scanner tls`. One hash per line: 64 hex chars OR 44-char base64,
+# optionally followed by a label. Lines starting with # are comments.
+#
+# The eMudhra intermediate-CA SPKI hashes were NOT published in the sources I could verify
+# (Google's Chrome post points to the Chromium CRLSet and the CCADB list). Add them here from
+# those primary sources; never from a screenshot or summary. Example line (not a real hash):
+# 0000000000000000000000000000000000000000000000000000000000000000  example-label
