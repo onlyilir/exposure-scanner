@@ -22,17 +22,24 @@ using System.Windows.Media;
 using System.Windows.Threading;
 using Microsoft.Win32;
 
+#if SETUP
+[assembly: AssemblyTitle("Exposure Scanner Setup")]
+[assembly: AssemblyDescription("Installs Exposure Scanner for the current Windows account")]
+#else
 [assembly: AssemblyTitle("Exposure Scanner")]
-[assembly: AssemblyProduct("Exposure Scanner")]
 [assembly: AssemblyDescription("Website and code safety check-ups with plain-language reports")]
-[assembly: AssemblyVersion("0.7.0.0")]
-[assembly: AssemblyFileVersion("0.7.0.0")]
+#endif
+[assembly: AssemblyProduct("Exposure Scanner")]
+[assembly: AssemblyCompany("onlyilir")]
+[assembly: AssemblyCopyright("Copyright (c) 2026 onlyilir. MIT License.")]
+[assembly: AssemblyVersion("0.8.0.0")]
+[assembly: AssemblyFileVersion("0.8.0.0")]
 
 namespace ExposureScanner
 {
     static class Program
     {
-        public const string Version = "0.7.0";
+        public const string Version = "0.8.0";
         public const string AppName = "Exposure Scanner";
         public const string ExeName = "ExposureScanner.exe";
         public const string RepoUrl = "https://github.com/onlyilir/exposure-scanner";
@@ -43,6 +50,11 @@ namespace ExposureScanner
         static int Main(string[] args)
         {
             bool install = args.Contains("--install"), uninstall = args.Contains("--uninstall");
+#if SETUP
+            // Exposure-Scanner-Setup.exe: the same program built with the files inside it; it only installs
+            if (!uninstall)
+                install = true;
+#endif
             string target = ArgValue(args, "--target") ?? Installer.DefaultTarget;
 
             if (args.Contains("--quiet") && (install || uninstall))
@@ -1128,25 +1140,47 @@ namespace ExposureScanner
                                  StringComparison.OrdinalIgnoreCase);
         }
 
+        // The setup exe carries the program files inside itself as gzip resources ("payload/<name>.gz");
+        // a normal folder (release\payload, or an installed copy run with --install) has them as files.
+        static bool HasEmbeddedPayload()
+        {
+            return Assembly.GetExecutingAssembly().GetManifestResourceNames().Contains("payload/scanner.exe.gz");
+        }
+
+        // Writes one program file into target; false when the source has no such file.
+        static bool PutFile(string source, string name, string dst)
+        {
+            if (HasEmbeddedPayload())
+            {
+                Retry(() =>
+                {
+                    using (Stream res = Assembly.GetExecutingAssembly().GetManifestResourceStream("payload/" + name + ".gz"))
+                    using (var unzip = new System.IO.Compression.GZipStream(res, System.IO.Compression.CompressionMode.Decompress))
+                    using (FileStream o = File.Create(dst))
+                        unzip.CopyTo(o);
+                });
+                return true;
+            }
+            // flat (old packages) or under data\ in a normal folder
+            string src = Path.Combine(source, name);
+            if (!File.Exists(src))
+                src = Path.Combine(source, "data", name);
+            if (!File.Exists(src))
+                return false;
+            if (!SamePath(src, dst))
+                Retry(() => File.Copy(src, dst, true));
+            return true;
+        }
+
         public static void Install(string source, string target, Options o)
         {
             Directory.CreateDirectory(Path.Combine(target, "data"));
             foreach (string f in AppFiles)
-            {
-                string src = Path.Combine(source, f), dst = Path.Combine(target, f);
-                if (File.Exists(src) && !SamePath(src, dst))
-                    Retry(() => File.Copy(src, dst, true));
-            }
-            foreach (string f in DataFiles)
-            {
-                // flat in the setup package, under data\ in a normal folder
-                string src = File.Exists(Path.Combine(source, f)) ? Path.Combine(source, f) : Path.Combine(source, "data", f);
-                string dst = Path.Combine(target, "data", f);
-                if (!File.Exists(src))
+                if (!PutFile(source, f, Path.Combine(target, f)) && (f == Program.ExeName || f == "scanner.exe"))
                     throw new FileNotFoundException("The setup package is incomplete (" + f + " is missing).");
-                if (!SamePath(src, dst))
-                    Retry(() => File.Copy(src, dst, true));
-            }
+            foreach (string f in DataFiles)
+                if (!PutFile(source, f, Path.Combine(target, "data", f)))
+                    throw new FileNotFoundException("The setup package is incomplete (" + f + " is missing).");
             if (!File.Exists(Path.Combine(target, "scanner.exe")) || !File.Exists(Path.Combine(target, Program.ExeName)))
                 throw new FileNotFoundException("The setup package is incomplete.");
 

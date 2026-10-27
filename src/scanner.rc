@@ -1,0 +1,37 @@
+// Windows resources for the single-file scanner.exe: icon, manifest and file details
+// (publisher, version, copyright), so the program is not an anonymous binary.
+#include <winver.h>
+#include "version_info.h"
+
+1 ICON "../app/app.ico"
+1 24 "scanner.manifest"
+
+VS_VERSION_INFO VERSIONINFO
+FILEVERSION ES_VERSION_NUM
+PRODUCTVERSION ES_VERSION_NUM
+FILEFLAGSMASK VS_FFI_FILEFLAGSMASK
+FILEFLAGS 0
+FILEOS VOS_NT_WINDOWS32
+FILETYPE VFT_APP
+FILESUBTYPE VFT2_UNKNOWN
+BEGIN
+    BLOCK "StringFileInfo"
+    BEGIN
+        BLOCK "040904b0"
+        BEGIN
+            VALUE "CompanyName", "onlyilir"
+            VALUE "FileDescription", "Exposure Scanner command line"
+            VALUE "FileVersion", ES_VERSION_STR
+            VALUE "InternalName", "scanner"
+            VALUE "LegalCopyright", "Copyright (c) 2026 onlyilir. MIT License."
+            VALUE "OriginalFilename", "scanner.exe"
+            VALUE "ProductName", "Exposure Scanner"
+            VALUE "ProductVersion", ES_VERSION_STR
+            VALUE "Comments", "https://github.com/onlyilir/exposure-scanner"
+        END
+    END
+    BLOCK "VarFileInfo"
+    BEGIN
+        VALUE "Translation", 0x409, 1200
+    END
+END

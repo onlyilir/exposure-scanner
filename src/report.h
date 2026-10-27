@@ -9,7 +9,9 @@
 #include "secret_scan.h"
 #include "tls_audit.h"
 
-#define SCANNER_VERSION "0.7.0"
+#include "version_info.h"
+
+#define SCANNER_VERSION ES_VERSION_STR
 
 /* Results of one CLI run. A module that did not run has run_* == 0 (or n == 0 for the
    network lists). *_error marks a module that ran but could not finish (e.g. out of memory). */

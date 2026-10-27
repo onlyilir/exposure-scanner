@@ -1,7 +1,8 @@
-# Builds the desktop app and its installer. No downloads: the engine uses MSYS2 (already set up),
-# the app uses the .NET Framework compiler that ships with Windows, Setup.exe uses IExpress.
-#   release\payload\                 ExposureScanner.exe, scanner.exe, data\, README.txt (runnable as is)
-#   release\Exposure-Scanner-Setup.exe
+# Builds the desktop app, its installer and a portable zip. No downloads: the engine uses MSYS2,
+# the app and the installer use the .NET Framework compiler that ships with Windows.
+#   release\payload\                          ExposureScanner.exe, scanner.exe, data\, read-me, licenses
+#   release\Exposure-Scanner-Setup.exe         the app built with /define:SETUP and the payload inside it
+#   release\Exposure-Scanner-<ver>-portable.zip
 # Usage: powershell -NoProfile -ExecutionPolicy Bypass -File app\Build-App.ps1 [-SkipEngine] [-NoSetup]
 param([switch]$SkipEngine, [switch]$NoSetup)
 $ErrorActionPreference = 'Stop'
@@ -10,8 +11,9 @@ $root = Split-Path -Parent $app
 $release = Join-Path $root 'release'
 $payload = Join-Path $release 'payload'
 New-Item -ItemType Directory -Force -Path $payload, (Join-Path $payload 'data') | Out-Null
+$version = [regex]::Match((Get-Content (Join-Path $app 'App.cs') -Raw), 'const string Version = "([0-9.]+)"').Groups[1].Value
 
-# 1. engine: single-file scanner.exe (OpenSSL linked in)
+# 1. engine: single-file scanner.exe (OpenSSL linked in, version info and icon)
 if (-not $SkipEngine) {
     $posix = '/' + $root.Substring(0, 1).ToLower() + ($root.Substring(2) -replace '\\', '/')
     $env:MSYSTEM = 'UCRT64'; $env:CHERE_INVOKING = '1'
@@ -25,30 +27,33 @@ if (-not (Test-Path (Join-Path $app 'app.ico'))) {
     & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $app 'Make-Icon.ps1')
 }
 
-# 3. desktop app (WPF, C# 5)
+# 3. desktop app (WPF, C# 5); the installer is the same source with SETUP defined
 $fw = Join-Path $env:WINDIR 'Microsoft.NET\Framework64\v4.0.30319'
 $csc = Join-Path $fw 'csc.exe'
 $refs = @('WPF\PresentationFramework.dll', 'WPF\PresentationCore.dll', 'WPF\WindowsBase.dll', 'System.Xaml.dll',
           'System.Web.Extensions.dll', 'Microsoft.CSharp.dll', 'System.Core.dll', 'System.dll') |
         ForEach-Object { '/reference:' + (Join-Path $fw $_) }
-$cscArgs = @('/nologo', '/target:winexe', '/optimize+', '/codepage:65001', '/warn:4',
-             ('/out:' + (Join-Path $payload 'ExposureScanner.exe')),
-             ('/win32icon:' + (Join-Path $app 'app.ico')),
-             ('/win32manifest:' + (Join-Path $app 'app.manifest')),
-             ('/resource:' + (Join-Path $app 'Styles.xaml') + ',Styles.xaml'),
-             ('/resource:' + (Join-Path $app 'MainWindow.xaml') + ',MainWindow.xaml'),
-             ('/resource:' + (Join-Path $app 'SetupWindow.xaml') + ',SetupWindow.xaml')) + $refs + @((Join-Path $app 'App.cs'))
-& $csc @cscArgs
-if ($LASTEXITCODE -ne 0) { throw 'App build failed.' }
+function Invoke-Csc([string]$out, [string[]]$extra) {
+    $cscArgs = @('/nologo', '/target:winexe', '/optimize+', '/codepage:65001', '/warn:4', ('/out:' + $out),
+                 ('/win32icon:' + (Join-Path $app 'app.ico')),
+                 ('/win32manifest:' + (Join-Path $app 'app.manifest')),
+                 ('/resource:' + (Join-Path $app 'Styles.xaml') + ',Styles.xaml'),
+                 ('/resource:' + (Join-Path $app 'MainWindow.xaml') + ',MainWindow.xaml'),
+                 ('/resource:' + (Join-Path $app 'SetupWindow.xaml') + ',SetupWindow.xaml')) + $extra + $refs +
+               @((Join-Path $app 'App.cs'))
+    & $csc @cscArgs
+    if ($LASTEXITCODE -ne 0) { throw "Build of $out failed." }
+}
+Invoke-Csc (Join-Path $payload 'ExposureScanner.exe') @()
 
-# 4. data and a short read-me
+# 4. data, a short read-me and the licenses
 Copy-Item (Join-Path $root 'data\advisories.txt'), (Join-Path $root 'data\spki_blocklist.txt') (Join-Path $payload 'data') -Force
 Set-Content -Path (Join-Path $payload 'README.txt') -Encoding ASCII -Value @'
 Exposure Scanner
 ================
 Website and code safety check-ups with plain-language reports.
 
-Desktop app: open "Exposure Scanner" from the Start menu.
+Desktop app: open "Exposure Scanner" from the Start menu (portable zip: run ExposureScanner.exe).
 Command line: open a new Command Prompt or PowerShell window and type
     scanner site shop.com --i-own-this --html report.html
     scanner secrets C:\code\my-project
@@ -66,64 +71,35 @@ If it saves you time: https://buymeacoffee.com/only.ilir
 '@
 Copy-Item (Join-Path $root 'LICENSE') (Join-Path $payload 'LICENSE.txt') -Force
 Copy-Item (Join-Path $root 'THIRD-PARTY-NOTICES.txt') (Join-Path $payload 'THIRD-PARTY-NOTICES.txt') -Force
-Write-Output "App built: $payload"
+Write-Output "App built: $payload (version $version)"
 if ($NoSetup) { return }
 
-# 5. Setup.exe (IExpress cannot hold folders, so the package is flat; the installer puts the
-#    data files into data\). IExpress prefers paths without spaces, so it works in TEMP.
+# 5. Exposure-Scanner-Setup.exe: the app with every program file gzip-compressed inside it as a
+#    resource "payload/<name>.gz". No self-extractor (IExpress), nothing unpacked to TEMP.
 $stage = Join-Path $env:TEMP 'exposure-scanner-setup'
 Remove-Item -Recurse -Force $stage -ErrorAction SilentlyContinue
-$pkg = Join-Path $stage 'pkg'
-New-Item -ItemType Directory -Force -Path $pkg | Out-Null
-$files = @('ExposureScanner.exe', 'scanner.exe', 'README.txt', 'LICENSE.txt', 'THIRD-PARTY-NOTICES.txt')
-foreach ($f in $files) { Copy-Item (Join-Path $payload $f) $pkg }
-Copy-Item (Join-Path $payload 'data\advisories.txt'), (Join-Path $payload 'data\spki_blocklist.txt') $pkg
-$all = $files + @('advisories.txt', 'spki_blocklist.txt')
-$exeTmp = Join-Path $stage 'Exposure-Scanner-Setup.exe'
-$sed = Join-Path $stage 'setup.sed'
-$strings = ''; $list = ''
-for ($i = 0; $i -lt $all.Count; $i++) { $strings += "FILE$i=`"$($all[$i])`"`r`n"; $list += "%FILE$i%=`r`n" }
-Set-Content -LiteralPath $sed -Encoding ASCII -Value @"
-[Version]
-Class=IEXPRESS
-SEDVersion=3
-[Options]
-PackagePurpose=InstallApp
-ShowInstallProgramWindow=1
-HideExtractAnimation=1
-UseLongFileName=1
-InsideCompressed=0
-CAB_FixedSize=0
-CAB_ResvCodeSigning=0
-RebootMode=N
-InstallPrompt=%InstallPrompt%
-DisplayLicense=%DisplayLicense%
-FinishMessage=%FinishMessage%
-TargetName=%TargetName%
-FriendlyName=%FriendlyName%
-AppLaunched=%AppLaunched%
-PostInstallCmd=%PostInstallCmd%
-AdminQuietInstCmd=%AdminQuietInstCmd%
-UserQuietInstCmd=%UserQuietInstCmd%
-SourceFiles=SourceFiles
-[Strings]
-InstallPrompt=
-DisplayLicense=
-FinishMessage=
-TargetName=$exeTmp
-FriendlyName=Exposure Scanner Setup
-AppLaunched=ExposureScanner.exe --install
-PostInstallCmd=<None>
-AdminQuietInstCmd=
-UserQuietInstCmd=
-$strings[SourceFiles]
-SourceFiles0=$pkg\
-[SourceFiles0]
-$list
-"@
-$p = Start-Process -FilePath (Join-Path $env:SystemRoot 'System32\iexpress.exe') -ArgumentList @('/N', '/Q', '/M', $sed) -Wait -PassThru -WindowStyle Hidden
-if (-not (Test-Path -LiteralPath $exeTmp)) { throw "IExpress did not produce the setup exe (exit code $($p.ExitCode))." }
+New-Item -ItemType Directory -Force -Path $stage | Out-Null
+$files = @{
+    'ExposureScanner.exe' = 'ExposureScanner.exe'; 'scanner.exe' = 'scanner.exe'; 'README.txt' = 'README.txt'
+    'LICENSE.txt' = 'LICENSE.txt'; 'THIRD-PARTY-NOTICES.txt' = 'THIRD-PARTY-NOTICES.txt'
+    'advisories.txt' = 'data\advisories.txt'; 'spki_blocklist.txt' = 'data\spki_blocklist.txt'
+}
+$resArgs = @()
+foreach ($name in $files.Keys) {
+    $gz = Join-Path $stage "$name.gz"
+    $in = [IO.File]::OpenRead((Join-Path $payload $files[$name]))
+    $out = [IO.File]::Create($gz)
+    $zip = New-Object IO.Compression.GZipStream($out, [IO.Compression.CompressionLevel]::Optimal)
+    $in.CopyTo($zip); $zip.Dispose(); $out.Dispose(); $in.Dispose()
+    $resArgs += ('/resource:' + $gz + ',payload/' + $name + '.gz')
+}
 $setup = Join-Path $release 'Exposure-Scanner-Setup.exe'
-Copy-Item -LiteralPath $exeTmp -Destination $setup -Force
+Invoke-Csc $setup (@('/define:SETUP') + $resArgs)
 Remove-Item -Recurse -Force $stage -ErrorAction SilentlyContinue
 Write-Output ("Setup written: {0} ({1:N1} MB)" -f $setup, ((Get-Item $setup).Length / 1MB))
+
+# 6. portable zip: the payload folder as it is (runs from anywhere; no Start menu, PATH or Apps entry)
+$zipPath = Join-Path $release "Exposure-Scanner-$version-portable.zip"
+Remove-Item $zipPath -ErrorAction SilentlyContinue
+Compress-Archive -Path (Join-Path $payload '*') -DestinationPath $zipPath
+Write-Output ("Portable zip written: {0} ({1:N1} MB)" -f $zipPath, ((Get-Item $zipPath).Length / 1MB))

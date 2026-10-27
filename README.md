@@ -26,6 +26,10 @@ It is read-only and defensive: it never logs in, attacks, guesses passwords or c
 
 Uninstall from Windows Settings > Apps > Exposure Scanner. Your saved reports stay in `Documents\Exposure Scanner\Reports`.
 
+**No installer wanted?** Download **Exposure-Scanner-&lt;version&gt;-portable.zip** instead, unzip it anywhere and run `ExposureScanner.exe`.
+
+**Antivirus removed it?** Some antivirus programs (Norton, for example) quarantine new programs that few people have downloaded yet, especially unsigned ones, even when they are harmless. The source code is all here to check. You can restore the file from your antivirus quarantine and add an exception, and each release lists the SHA-256 of its files so you can confirm you have the original.
+
 Requirements: Windows 10 or 11, 64-bit. Microsoft Edge (built into Windows) is used to save reports as PDF.
 
 ## How a check-up works
@@ -71,13 +75,13 @@ This builds `scanner.exe` and the test programs and runs every test. `make` and 
 
 This `scanner.exe` needs the DLLs in `C:\msys64\ucrt64\bin` on its `PATH` when you run it outside MSYS2.
 
-The desktop app and the installer (no further downloads: the app is built with the .NET Framework compiler that ships with Windows, the installer with Windows' IExpress):
+The desktop app and the installer (no further downloads: both are built with the .NET Framework compiler that ships with Windows; the installer is the app itself with the program files compressed inside it):
 
 ```bash
 powershell -NoProfile -ExecutionPolicy Bypass -File app\Build-App.ps1
 ```
 
-This writes a single-file `scanner.exe` (OpenSSL built in, `scripts/build_static.sh`), `ExposureScanner.exe` and `release\Exposure-Scanner-Setup.exe`. `app\Test-Setup.ps1` tests the installer in a temporary folder without changing the PC, and `ExposureScanner.exe --ui-snapshots <folder>` renders every screen to PNG.
+This writes a single-file `scanner.exe` (OpenSSL built in, file details from `src/scanner.rc`, `scripts/build_static.sh`), `ExposureScanner.exe`, `release\Exposure-Scanner-Setup.exe` and a portable zip. `app\Test-Setup.ps1` tests the installer in a temporary folder without changing the PC, and `ExposureScanner.exe --ui-snapshots <folder>` renders every screen to PNG.
 
 ## Command line
 
