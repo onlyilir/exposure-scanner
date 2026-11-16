@@ -732,9 +732,31 @@ static void json_summary(const scan_report *r, FILE *out, int *f)
         kv_str(out, &h, "title", s->items[i].title);
         kv_str(out, &h, "fix", s->items[i].fix);
         kv_str(out, &h, "detail", s->items[i].detail);
+        if (s->items[i].is_new)
+            kv_bool(out, &h, "new", 1);
         fputc('}', out);
     }
-    fputs("]}", out);
+    fputc(']', out);
+    if (s->since) {
+        unsigned long j;
+
+        key(out, &g, "since");
+        fputc('{', out);
+        h = 1;
+        kv_opt(out, &h, "date", r->since_date != NULL ? r->since_date : "");
+        kv_ulong(out, &h, "fixed", s->nfixed);
+        kv_ulong(out, &h, "new", s->nnew);
+        kv_ulong(out, &h, "still_open", s->nstill);
+        key(out, &h, "fixed_issues");
+        fputc('[', out);
+        for (j = 0; j < s->nfixed && j < 20; j++) {
+            if (j > 0)
+                fputc(',', out);
+            report_json_string(out, s->fixed[j]);
+        }
+        fputs("]}", out);
+    }
+    fputc('}', out);
     free(s);
 }
 

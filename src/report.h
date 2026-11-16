@@ -30,6 +30,9 @@ typedef struct {
     const vulndb *db; /* security data for the software found on websites; NULL = none */
     mail_result *mail; /* nmail entries (email spoofing protection per domain), owned */
     size_t nmail;
+    const char *since_items; /* previous check-up's issues (level TAB site TAB title per line), or NULL */
+    const char *since_date;  /* when it ran, shown in the report */
+    int monthly;             /* monthly monitoring: warn about what expires before the next one */
 } scan_report;
 
 /* Per-module exit codes (0 clean, 1 findings, 2 error/no result); -1 when the module did
@@ -70,6 +73,7 @@ typedef struct {
     const char *client; /* shown as the title; may be NULL */
     const char *by;     /* "Prepared by ..."; may be NULL */
     const char *date;   /* e.g. "23 October 2026" */
+    int monthly;        /* a monthly monitoring check-up: says so in the heading */
 } report_meta;
 
 /* Self-contained page (no external files), prints to PDF from a browser. Returns the number of
@@ -78,13 +82,14 @@ typedef struct {
 int report_write_html(const scan_report *r, const report_meta *m, FILE *out);
 
 /* The same verdict the HTML report shows, for the JSON "summary" (the desktop app reads it). */
-#define SUMMARY_MAX_ITEMS 40
+#define SUMMARY_MAX_ITEMS 100
 typedef struct {
     int level; /* WEB_TIP .. WEB_IMPORTANT */
     char site[128];
     char title[200];
     char fix[360];
     char detail[300]; /* where / technical detail, e.g. "src/a.c, line 3, value ****abcd" */
+    int is_new;       /* not in the previous check-up */
 } summary_item;
 
 typedef struct {
@@ -93,6 +98,9 @@ typedef struct {
     int intercepted, failed_targets, unfinished;
     summary_item items[SUMMARY_MAX_ITEMS];  /* issues, worst first */
     int nitems;
+    int since;                              /* compared with a previous check-up */
+    unsigned long nfixed, nnew, nstill;
+    char fixed[20][330];                    /* first fixed problems, "title (site)" */
 } report_summary;
 
 void report_summarize(const scan_report *r, report_summary *s);

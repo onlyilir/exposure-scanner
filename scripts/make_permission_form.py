@@ -12,7 +12,7 @@ from reportlab.lib.styles import ParagraphStyle
 from reportlab.pdfgen import canvas
 from reportlab.platypus import Paragraph
 
-VERSION = "0.9.1"
+VERSION = "0.10"
 PAGES = [2]  # total pages, set by a first build
 OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "docs", "permission-form.pdf")
 

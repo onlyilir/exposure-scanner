@@ -32,14 +32,14 @@ using Microsoft.Win32;
 [assembly: AssemblyProduct("Exposure Scanner")]
 [assembly: AssemblyCompany("onlyilir")]
 [assembly: AssemblyCopyright("Copyright (c) 2026 onlyilir. MIT License.")]
-[assembly: AssemblyVersion("0.9.1.0")]
-[assembly: AssemblyFileVersion("0.9.1.0")]
+[assembly: AssemblyVersion("0.10.0.0")]
+[assembly: AssemblyFileVersion("0.10.0.0")]
 
 namespace ExposureScanner
 {
     static class Program
     {
-        public const string Version = "0.9.1";
+        public const string Version = "0.10.0";
         public const string AppName = "Exposure Scanner";
         public const string ExeName = "ExposureScanner.exe";
         public const string RepoUrl = "https://github.com/onlyilir/exposure-scanner";
@@ -218,7 +218,7 @@ namespace ExposureScanner
         public string Path { get; set; }
     }
 
-    class MainController
+    partial class MainController
     {
         public readonly Window Window;
         readonly Window w;
@@ -227,7 +227,8 @@ namespace ExposureScanner
         readonly Button runButton;
         readonly TextBlock runHint, formError, runningTitle, runningStep, pdfStatus;
         readonly FrameworkElement formPanel, runningPanel, siteFields, folderFields, scanTip;
-        readonly RadioButton modeSite, navCheck, navReports, navHelp;
+        readonly RadioButton modeSite, navCheck, navReports, navHelp, navMonitor;
+        string lastResultClient, lastResultSite; // the last check-up shown, for "Monitor monthly"
         readonly FrameworkElement[] pages;
         string lastReport;
         bool running;
@@ -263,9 +264,11 @@ namespace ExposureScanner
             navCheck = Ui.Find<RadioButton>(w, "NavCheck");
             navReports = Ui.Find<RadioButton>(w, "NavReports");
             navHelp = Ui.Find<RadioButton>(w, "NavHelp");
+            navMonitor = Ui.Find<RadioButton>(w, "NavMonitor");
             pages = new FrameworkElement[] {
                 Ui.Find<FrameworkElement>(w, "PageCheck"), Ui.Find<FrameworkElement>(w, "PageResult"),
-                Ui.Find<FrameworkElement>(w, "PageReports"), Ui.Find<FrameworkElement>(w, "PageHelp") };
+                Ui.Find<FrameworkElement>(w, "PageReports"), Ui.Find<FrameworkElement>(w, "PageHelp"),
+                Ui.Find<FrameworkElement>(w, "PageMonitor") };
 
             Ui.Find<TextBlock>(w, "VersionText").Text = "Version " + Program.Version;
             byBox.Text = Settings.Load("by");
@@ -274,6 +277,7 @@ namespace ExposureScanner
             navCheck.Checked += delegate { ShowPage(0); };
             navReports.Checked += delegate { RefreshReports(); ShowPage(2); };
             navHelp.Checked += delegate { ShowPage(3); };
+            navMonitor.Checked += delegate { RefreshMonitor(); ShowPage(4); };
             Ui.Find<Button>(w, "BackButton").Click += delegate { ShowPage(0); };
 
             // form
@@ -342,6 +346,7 @@ namespace ExposureScanner
             }));
 
             BuildHelp();
+            InitMonitoring();
             Validate();
             Ui.Find<Button>(w, "CoffeeButton").Click += delegate { Ui.Open(Program.CoffeeUrl); };
             Ui.Find<Button>(w, "UpdateButton").Click += delegate { Ui.Open(Program.RepoUrl + "/releases/latest"); };
@@ -581,6 +586,9 @@ namespace ExposureScanner
 
         void ShowResult(string json, string html, string label, string client)
         {
+            lastResultClient = client;
+            lastResultSite = SiteMode ? label : null;
+            Ui.Find<FrameworkElement>(w, "MonitorButton").Visibility = SiteMode ? Visibility.Visible : Visibility.Collapsed;
             lastReport = html;
             pdfStatus.Visibility = Visibility.Collapsed;
             Dictionary<string, object> summary = null;
@@ -825,6 +833,11 @@ namespace ExposureScanner
             navHelp.IsChecked = true;
             await snap("07-help.png");
             Snapshots.Save((FrameworkElement)((ScrollViewer)pages[3]).Content, Path.Combine(dir, "07b-help-full.png"));
+            navMonitor.IsChecked = true;
+            await snap("13-monitoring.png");
+            ShowMonForm(null, "Rosa's Bakery", "rosas-bakery.example");
+            await snap("13b-monitoring-add.png");
+            Ui.Find<FrameworkElement>(w, "MonForm").Visibility = Visibility.Collapsed;
 
             navCheck.IsChecked = true;
             Ui.Find<RadioButton>(w, "ModeFolder").IsChecked = true;

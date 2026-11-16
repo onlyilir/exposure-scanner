@@ -983,7 +983,7 @@ static void test_html(void)
     scan_report r;
     probe_result pr[3];
     tls_result *tr = calloc(2, sizeof *tr);
-    report_meta m = {"Rosa's Bakery & <Caf\xe9>", "Sam \"Checks\"", "23 October 2026"};
+    report_meta m = {"Rosa's Bakery & <Caf\xe9>", "Sam \"Checks\"", "23 October 2026", 0};
     secret_hit sh;
     char *s;
     size_t n;
@@ -1088,7 +1088,7 @@ static void test_platform_report(void)
 {
     scan_report r;
     probe_result pr[2];
-    report_meta m = {"GitHub Pages test", "Your Name", "24 October 2026"};
+    report_meta m = {"GitHub Pages test", "Your Name", "24 October 2026", 0};
     char *s, *j;
     size_t n;
     int w;
@@ -1231,7 +1231,7 @@ int main(int argc, char **argv)
         scan_report r;
         probe_result pr[3];
         tls_result *tr = calloc(2, sizeof *tr);
-        report_meta m = {"Rosa's Bakery (sample)", "Your Name", "23 October 2026"};
+        report_meta m = {"Rosa's Bakery (sample)", "Your Name", "23 October 2026", 0};
         FILE *f = fopen(argv[2], "wb");
 
         if (tr == NULL || f == NULL)

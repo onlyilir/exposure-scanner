@@ -44,6 +44,17 @@ Requirements: Windows 10 or 11, 64-bit. Microsoft Edge (built into Windows) is u
 
 ![Result](docs/screenshots/result.png)
 
+### Monthly monitoring
+
+For clients who chose monthly re-checks on the permission form. In the app, open **Monitoring** > **Add client** and enter the business name, its websites, the date the permission form was signed and the first check-up date. The page then shows which check-ups are due, and a badge in the sidebar counts them.
+
+- Check-ups run only when you press **Run**, never in the background, and at most once a month per client, as the permission form allows. A check-up that was not ready to send (for example because HTTPS scanning was on) can be run again; it replaces that month's one.
+- Each monthly report opens with **Since the last check-up**: what was fixed (by name), what is new (marked **New** in the list) and what is still open. It also warns about certificates that expire before the next monthly check-up.
+- New important or recommended problems, and expiring certificates, show a Windows notification and a **Needs attention** label on the client.
+- The client list is `%APPDATA%\Exposure Scanner\clients.json` (it stays after uninstalling, like your reports); each check-up's results are kept next to it to compare with next month. **Pause** stops a client's check-ups, **Remove** takes them off the list.
+
+From the command line: `scanner site <domains> --i-own-this --monthly --html report.html --since last-month.txt --since-date "16 October 2026"`, where `last-month.txt` lists last month's issues as `level<TAB>site<TAB>title` lines (the `level`, `site` and `title` of each issue in the previous run's JSON `summary.issues`). The JSON then has `summary.since` (`fixed`, `new`, `still_open`, `fixed_issues`) and `"new": true` on new issues.
+
 Reports are self-contained web pages with the verdict, counts (Important, Recommended, Tips, Passed), each problem with "Why it matters" and "What to do", and every check per website. See a [sample report](examples/sample-report.html) made from invented data.
 
 ## What it checks

@@ -434,8 +434,92 @@ static void test_mail(void)
     CHECK(level_of(&r, "mail_dns") == WEB_NOTE && level_of(&r, "spf") == -1, "no DNS answer: one note");
 }
 
+/* monthly monitoring: this month's issues against last month's (--since) */
+static void test_since(void)
+{
+    vulndb db;
+    scan_report r;
+    probe_result p;
+    report_summary s;
+    report_meta meta = {"Shop", NULL, "16 November 2026", 1};
+    const char *prev = "tmp_since_prev.txt", *html = "tmp_since.html";
+    FILE *f = fopen(prev, "wb");
+    char page[65536];
+    size_t got;
+    int i, new_os = 0, still_wp = 0;
+
+    if (f == NULL) {
+        CHECK(0, "write the previous issues file");
+        return;
+    }
+    /* last month: WordPress 7.0.0 had holes (now 7.0.1: still open, numbers differ), a referrer
+       tip that is gone (fixed), and the same tip listed twice (counted once) */
+    fputs("important\tshop.example\tWordPress 7.0.0 has 5 known security holes, 3 used by attackers\n"
+          "tip\tshop.example\tNo referrer policy is set\n"
+          "tip\tshop.example\tNo referrer policy is set\n"
+          "note\tshop.example\tSoftware found: WordPress 7.0.0\n"
+          "garbage line without tabs\n", f);
+    fclose(f);
+
+    memset(&db, 0, sizeof db);
+    vdb_load_text(&db, DATA);
+    vdb_set_today("2026-11-16");
+    memset(&p, 0, sizeof p);
+    snprintf(p.t.host, sizeof p.t.host, "shop.example");
+    p.t.port = 443;
+    p.t.tls = 1;
+    p.connected = 1;
+    p.status = 200;
+    p.tech.t[0] = item("wordpress", "7.0.1", TECH_EXACT, TECH_SITE, "");
+    p.tech.t[1] = item("php", "7.4.3", TECH_EXACT, TECH_SERVER, "ubuntu");
+    p.tech.n = 2;
+    memset(&r, 0, sizeof r);
+    r.http = &p;
+    r.nhttp = 1;
+    r.db = &db;
+    r.since_items = prev;
+    r.since_date = "16 October 2026";
+
+    report_summarize(&r, &s);
+    CHECK(s.since && s.nfixed == 1 && s.nstill == 1, "one fixed (counted once), one still open");
+    CHECK(s.nnew == 1, "the Ubuntu item is new");
+    CHECK(strstr(s.fixed[0], "No referrer policy is set (shop.example)") != NULL, "fixed issue named");
+    for (i = 0; i < s.nitems; i++) {
+        if (strstr(s.items[i].title, "Ubuntu 20.04") && s.items[i].is_new)
+            new_os = 1;
+        if (strstr(s.items[i].title, "WordPress 7.0.1") && !s.items[i].is_new)
+            still_wp = 1;
+    }
+    CHECK(new_os && still_wp, "new and still-open items flagged per issue");
+
+    if ((f = fopen(html, "wb")) != NULL) {
+        report_write_html(&r, &meta, f);
+        fclose(f);
+    }
+    f = fopen(html, "rb");
+    got = f != NULL ? fread(page, 1, sizeof page - 1, f) : 0;
+    if (f != NULL)
+        fclose(f);
+    page[got] = '\0';
+    CHECK(strstr(page, "Monthly Website Safety Check-up") != NULL, "monthly heading");
+    CHECK(strstr(page, "Since the last check-up (16 October 2026)") != NULL, "since section with date");
+    CHECK(strstr(page, "<b>1</b><span>Fixed</span>") != NULL, "fixed tile");
+    CHECK(strstr(page, "<span class=\"badge new\">New</span>") != NULL, "new badge on a card");
+
+    /* no previous file: no comparison */
+    r.since_items = "tmp_no_such_since.txt";
+    report_summarize(&r, &s);
+    CHECK(!s.since, "a missing file means no since section");
+
+    remove(prev);
+    remove(html);
+    vdb_set_today(NULL);
+    vdb_free(&db);
+}
+
 int main(void)
 {
+    test_since();
     test_mail();
     test_versions();
     test_headers();

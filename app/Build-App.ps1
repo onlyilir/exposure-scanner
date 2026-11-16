@@ -31,7 +31,7 @@ if (-not (Test-Path (Join-Path $app 'app.ico'))) {
 $fw = Join-Path $env:WINDIR 'Microsoft.NET\Framework64\v4.0.30319'
 $csc = Join-Path $fw 'csc.exe'
 $refs = @('WPF\PresentationFramework.dll', 'WPF\PresentationCore.dll', 'WPF\WindowsBase.dll', 'System.Xaml.dll',
-          'System.Web.Extensions.dll', 'System.Management.dll', 'Microsoft.CSharp.dll', 'System.Core.dll', 'System.dll') |
+          'System.Web.Extensions.dll', 'System.Management.dll', 'System.Windows.Forms.dll', 'System.Drawing.dll', 'Microsoft.CSharp.dll', 'System.Core.dll', 'System.dll') |
         ForEach-Object { '/reference:' + (Join-Path $fw $_) }
 function Invoke-Csc([string]$out, [string[]]$extra) {
     $cscArgs = @('/nologo', '/target:winexe', '/optimize+', '/codepage:65001', '/warn:4', ('/out:' + $out),
@@ -40,7 +40,8 @@ function Invoke-Csc([string]$out, [string[]]$extra) {
                  ('/resource:' + (Join-Path $app 'Styles.xaml') + ',Styles.xaml'),
                  ('/resource:' + (Join-Path $app 'MainWindow.xaml') + ',MainWindow.xaml'),
                  ('/resource:' + (Join-Path $app 'SetupWindow.xaml') + ',SetupWindow.xaml')) + $extra + $refs +
-               @((Join-Path $app 'App.cs'), (Join-Path $app 'VulnData.cs'), (Join-Path $app 'HttpsScanning.cs'))
+               @((Join-Path $app 'App.cs'), (Join-Path $app 'VulnData.cs'), (Join-Path $app 'HttpsScanning.cs'),
+                 (Join-Path $app 'Monitoring.cs'))
     & $csc @cscArgs
     if ($LASTEXITCODE -ne 0) { throw "Build of $out failed." }
 }

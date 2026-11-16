@@ -61,6 +61,17 @@
               <TextBlock Text="New check-up" VerticalAlignment="Center"/>
             </StackPanel>
           </RadioButton>
+          <RadioButton x:Name="NavMonitor" Style="{StaticResource NavButton}">
+            <StackPanel Orientation="Horizontal">
+              <Path Style="{StaticResource NavIcon}" Data="M3,12 L7,12 L10,5 L14,19 L17,12 L21,12"/>
+              <TextBlock Text="Monitoring" VerticalAlignment="Center"/>
+              <Border x:Name="MonBadge" Background="#F59E0B" CornerRadius="9" MinWidth="18" Height="18" Padding="5,0"
+                      Margin="10,0,0,0" VerticalAlignment="Center" Visibility="Collapsed">
+                <TextBlock x:Name="MonBadgeText" Text="0" Foreground="#0F172A" FontSize="11" FontWeight="SemiBold"
+                           HorizontalAlignment="Center" VerticalAlignment="Center"/>
+              </Border>
+            </StackPanel>
+          </RadioButton>
           <RadioButton x:Name="NavReports" Style="{StaticResource NavButton}">
             <StackPanel Orientation="Horizontal">
               <Path Style="{StaticResource NavIcon}" Data="M7,3 L14,3 L19,8 L19,21 L7,21 Z M14,3 L14,8 L19,8 M10,13 L16,13 M10,17 L16,17"/>
@@ -284,6 +295,8 @@
             <Button x:Name="OpenReportButton" Style="{StaticResource PrimaryButton}" Content="Open report" Margin="0,0,10,10"/>
             <Button x:Name="PdfButton" Style="{StaticResource SecondaryButton}" Content="Save as PDF" Margin="0,0,10,10"/>
             <Button x:Name="ShowFolderButton" Style="{StaticResource SecondaryButton}" Content="Show in folder" Margin="0,0,10,10"/>
+            <Button x:Name="MonitorButton" Style="{StaticResource SecondaryButton}" Content="Monitor monthly" Margin="0,0,10,10"
+                    ToolTip="Add this client to monthly monitoring"/>
           </WrapPanel>
           <TextBlock x:Name="PdfStatus" Style="{StaticResource Hint}" Margin="2,0,0,0" Visibility="Collapsed"/>
 
@@ -387,6 +400,69 @@
               <TextBlock Style="{StaticResource Body}" Margin="0,6,0,0" Text="Run a check-up and its report shows up here."/>
             </StackPanel>
           </Border>
+        </StackPanel>
+      </ScrollViewer>
+
+      <!-- ===== page: monthly monitoring ===== -->
+      <ScrollViewer x:Name="PageMonitor" Grid.Row="1" VerticalScrollBarVisibility="Auto" Visibility="Collapsed">
+        <StackPanel Margin="56,6,56,48" MaxWidth="820" HorizontalAlignment="Left">
+          <TextBlock Text="Monthly monitoring" Style="{StaticResource PageTitle}"/>
+          <TextBlock Style="{StaticResource PageSub}" TextWrapping="Wrap"
+                     Text="Clients on a monthly plan. A check-up runs only when you press Run, never in the background, and each report shows what changed since the month before."/>
+
+          <Border Style="{StaticResource CardBox}" Margin="0,24,0,0">
+            <StackPanel>
+              <TextBlock x:Name="MonStatus" FontSize="15.5" FontWeight="SemiBold" TextWrapping="Wrap" Text="No clients yet."/>
+              <TextBlock x:Name="MonStatusSub" Style="{StaticResource Hint}" Margin="0,4,0,0" TextWrapping="Wrap"/>
+              <WrapPanel Margin="0,16,0,0">
+                <Button x:Name="MonRunDue" Style="{StaticResource PrimaryButton}" Content="Run due check-ups" Margin="0,0,10,10"/>
+                <Button x:Name="MonAdd" Style="{StaticResource SecondaryButton}" Content="Add client" Margin="0,0,10,10"/>
+              </WrapPanel>
+              <TextBlock x:Name="MonTip" Style="{StaticResource Hint}" TextWrapping="Wrap" Margin="0,2,0,0"/>
+            </StackPanel>
+          </Border>
+
+          <Border x:Name="MonForm" Style="{StaticResource CardBox}" Margin="0,16,0,0" Visibility="Collapsed">
+            <StackPanel>
+              <TextBlock x:Name="MonFormTitle" Text="Add a client" Style="{StaticResource SectionTitle}"/>
+              <TextBlock Text="Business name" Style="{StaticResource FieldLabel}" Margin="0,14,0,0"/>
+              <TextBox x:Name="MonName" Style="{StaticResource Field}" Tag="Rosa's Bakery"/>
+              <TextBlock Text="Websites, one per line" Style="{StaticResource FieldLabel}" Margin="0,14,0,0"/>
+              <TextBox x:Name="MonSites" Style="{StaticResource Field}" AcceptsReturn="True" TextWrapping="Wrap" Height="78"
+                       VerticalContentAlignment="Top" VerticalScrollBarVisibility="Auto" Tag="rosas-bakery.com"/>
+              <Grid Margin="0,14,0,0">
+                <Grid.ColumnDefinitions>
+                  <ColumnDefinition Width="*"/>
+                  <ColumnDefinition Width="16"/>
+                  <ColumnDefinition Width="*"/>
+                  <ColumnDefinition Width="16"/>
+                  <ColumnDefinition Width="*"/>
+                </Grid.ColumnDefinitions>
+                <StackPanel>
+                  <TextBlock Text="Your name" Style="{StaticResource FieldLabel}"/>
+                  <TextBox x:Name="MonBy" Style="{StaticResource Field}" Tag="Shown as &quot;Prepared by&quot;"/>
+                </StackPanel>
+                <StackPanel Grid.Column="2">
+                  <TextBlock Text="Permission signed on" Style="{StaticResource FieldLabel}"/>
+                  <DatePicker x:Name="MonSigned" SelectedDateFormat="Short" Height="40" VerticalContentAlignment="Center" FontSize="14"/>
+                </StackPanel>
+                <StackPanel Grid.Column="4">
+                  <TextBlock Text="First check-up" Style="{StaticResource FieldLabel}"/>
+                  <DatePicker x:Name="MonStart" SelectedDateFormat="Short" Height="40" VerticalContentAlignment="Center" FontSize="14"/>
+                </StackPanel>
+              </Grid>
+              <CheckBox x:Name="MonAgreed" Style="{StaticResource Check}" Margin="0,18,0,0">
+                <TextBlock TextWrapping="Wrap" Text="The client signed the permission form and chose monthly re-checks."/>
+              </CheckBox>
+              <TextBlock x:Name="MonFormError" Foreground="{StaticResource ImpFg}" FontSize="13" TextWrapping="Wrap" Margin="0,12,0,0" Visibility="Collapsed"/>
+              <WrapPanel Margin="0,18,0,0">
+                <Button x:Name="MonSave" Style="{StaticResource PrimaryButton}" Content="Save client" Margin="0,0,10,0"/>
+                <Button x:Name="MonCancel" Style="{StaticResource SecondaryButton}" Content="Cancel" Margin="0,0,10,0"/>
+              </WrapPanel>
+            </StackPanel>
+          </Border>
+
+          <StackPanel x:Name="MonList" Margin="0,16,0,0"/>
         </StackPanel>
       </ScrollViewer>
 

@@ -119,6 +119,8 @@ typedef struct {
     unsigned opts;
     const char *dir, *adv_path, *bl_path, *ca, *vdb_path;
     const char *html_path, *client, *by;
+    const char *since, *since_date; /* monthly monitoring: the last check-up's issues */
+    int monthly;
     probe_target http[PROBE_MAX_TARGETS];
     size_t nhttp;
     probe_target tls[MAX_TLS_TARGETS];
@@ -141,6 +143,9 @@ static void usage(void)
             "  scanner all [<dir>] [--site <domain>]... [--http <target>]...\n"
             "                [--tls <host[:port]>]... [--i-own-this] [any option above]\n"
             "Every command also takes --json, and --html <file> [--client ..] [--by ..].\n"
+            "Monthly monitoring: --monthly, and --since <file> [--since-date \"16 Oct 2026\"] with the\n"
+            "last check-up's issues (level TAB site TAB title per line) adds what was fixed, what is\n"
+            "new and what is still open.\n"
             "\n"
             "`site` checks one website: http:// and https:// (HTTPS redirect, security headers,\n"
             "software versions) plus its certificate. A redirect to the same site (www. or not)\n"
@@ -318,6 +323,12 @@ static int parse_args(int argc, char **argv, cli_args *c)
             c->client = v;
         } else if ((v = opt_val(c, argc, argv, &a, "--by", O_HTML)) != NULL) {
             c->by = v;
+        } else if ((v = opt_val(c, argc, argv, &a, "--since", O_HTML)) != NULL) {
+            c->since = v;
+        } else if ((v = opt_val(c, argc, argv, &a, "--since-date", O_HTML)) != NULL) {
+            c->since_date = v;
+        } else if (strcmp(s, "--monthly") == 0 && (c->opts & O_HTML)) {
+            c->monthly = 1;
         } else if ((v = opt_val(c, argc, argv, &a, "--http", O_TARGETS)) != NULL) {
             if (add_http(c, v) != 0)
                 return -1;
@@ -536,6 +547,7 @@ static int write_html(const scan_report *rep, const cli_args *c)
         snprintf(date, sizeof date, "(date unknown)");
     meta.client = c->client;
     meta.by = c->by;
+    meta.monthly = c->monthly;
     meta.date = date[0] == '0' ? date + 1 : date; /* "3 May", not "03 May" */
 #ifdef _WIN32
     {
@@ -645,6 +657,16 @@ int main(int argc, char **argv)
     if (c.nhttp > 0) {
         load_vulndb(c.vdb_path, &vdb);
         rep.db = &vdb;
+    }
+    rep.since_items = c.since;
+    rep.monthly = c.monthly;
+    rep.since_date = c.since_date;
+    if (c.since != NULL && !fs_is_file(c.since, NULL)) {
+        fprintf(stderr, "error: cannot read --since file '%s'\n", c.since);
+        adv_free(&adv);
+        spki_blocklist_free(&bl);
+        vdb_free(&vdb);
+        return 2;
     }
     if (run(&c, &adv, &bl, &rep) != 0) {
         fprintf(stderr, "error: out of memory\n");

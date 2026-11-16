@@ -3,6 +3,7 @@
    (www. and the bare name count as one site), worst level first. */
 #include "report.h"
 
+#include <ctype.h>
 #include <stdarg.h>
 #include <stdlib.h>
 #include <string.h>
@@ -10,6 +11,7 @@
 
 #define MAX_LISTED_SECRETS 50
 #define SITE_WEB 16
+#define SINCE_LIST 20 /* fixed problems listed by name in the "since" section */
 
 typedef struct {
     char key[128]; /* host without a leading "www." */
@@ -27,6 +29,7 @@ typedef struct {
     char detail[300];
     const char *why;
     char fix[360];
+    int is_new; /* not in the previous check-up (--since) */
 } item;
 
 typedef struct {
@@ -38,6 +41,12 @@ typedef struct {
     /* operator warnings */
     int intercepted, failed_targets, unfinished;
     const vulndb *db;
+    int monthly; /* monthly monitoring check-up (scan_report.monthly) */
+    /* comparison with the previous check-up (scan_report.since_items) */
+    int since;
+    char since_date[48];
+    unsigned long nfixed, nnew, nstill;
+    char fixed[SINCE_LIST][330];
 } model;
 
 /* ---------- building ---------- */
@@ -595,6 +604,15 @@ static void add_tls(model *m, const tls_result *t)
                      "Ask your host to renew it before that date and to turn on automatic "
                      "renewal.");
         }
+    } else if (m->monthly && leaf->days_left <= 35) {
+        /* monthly monitoring: the next check-up may come after it expires */
+        if ((it = add_item(m, WEB_TIP, si, "The certificate expires before the next monthly check-up")) != NULL) {
+            setf(it->detail, sizeof it->detail, "Valid until %s (%ld days)", leaf->not_after, leaf->days_left);
+            it->why = WHY_EXPIRY;
+            setf(it->fix, sizeof it->fix,
+                     "Check that automatic renewal is on. Most hosts renew certificates on their own about 30 days "
+                     "before they expire; if yours does not, renew it before that date.");
+        }
     } else if ((it = add_item(m, WEB_OK, si, "The certificate is valid for %ld more %s",
                               leaf->days_left,
                               pl((unsigned long)leaf->days_left, "day", "days"))) != NULL) {
@@ -769,6 +787,160 @@ static const char *where(const model *m, const item *it)
     return it->site < 0 ? "Code folder" : m->s[it->site].key;
 }
 
+/* ---------- since the last check-up (monthly monitoring) ---------- */
+
+/* "site|title" with every number collapsed to '#', so "WordPress 7.0.1 has 4 known security holes"
+   and "WordPress 7.0.2 has 1 known security hole" count as the same problem, still open */
+static void issue_key(const char *site, const char *title, char *out, size_t n)
+{
+    size_t o = 0;
+    const char *p;
+
+    for (p = site; *p != '\0' && o + 2 < n; p++)
+        out[o++] = (char)tolower((unsigned char)*p);
+    out[o++] = '|';
+    for (p = title; *p != '\0' && o + 1 < n;) {
+        if (isdigit((unsigned char)*p)) {
+            out[o++] = '#';
+            while (isdigit((unsigned char)*p) || (*p == '.' && isdigit((unsigned char)p[1])))
+                p++;
+        } else {
+            out[o++] = (char)tolower((unsigned char)*p++);
+        }
+    }
+    out[o] = '\0';
+    /* "1 known security hole" / "4 known security holes": singular and plural are one problem */
+    if (o > 0 && out[o - 1] == 's')
+        out[o - 1] = '\0';
+}
+
+typedef struct {
+    char key[360];
+    char shown[330]; /* "title (site)" */
+    int seen;        /* still there today */
+} prev_issue;
+
+/* previous issues, one "level<TAB>site<TAB>title" per line (the app writes them from the last
+   report's JSON summary); returns the count, or -1 when the file can't be read */
+static int load_previous(const char *path, prev_issue **out)
+{
+    FILE *f = fopen(path, "rb");
+    char line[700];
+    prev_issue *v = NULL;
+    int n = 0, cap = 0;
+
+    *out = NULL;
+    if (f == NULL)
+        return -1;
+    while (fgets(line, sizeof line, f) != NULL) {
+        char *site, *title;
+
+        line[strcspn(line, "\r\n")] = '\0';
+        if ((site = strchr(line, '\t')) == NULL || (title = strchr(site + 1, '\t')) == NULL)
+            continue;
+        *site++ = '\0';
+        *title++ = '\0';
+        if (strcmp(line, "tip") != 0 && strcmp(line, "recommended") != 0 && strcmp(line, "important") != 0)
+            continue;
+        if (n == cap) {
+            int c = cap ? cap * 2 : 32;
+            prev_issue *nv = realloc(v, (size_t)c * sizeof *nv);
+
+            if (nv == NULL)
+                break;
+            v = nv;
+            cap = c;
+        }
+        issue_key(site, title, v[n].key, sizeof v[n].key);
+        setf(v[n].shown, sizeof v[n].shown, "%s (%s)", title, site);
+        v[n].seen = 0;
+        n++;
+    }
+    fclose(f);
+    *out = v;
+    return n;
+}
+
+static void compare_since(model *m, const scan_report *r)
+{
+    prev_issue *prev;
+    int np, j;
+    size_t i;
+
+    if (r->since_items == NULL || (np = load_previous(r->since_items, &prev)) < 0)
+        return;
+    m->since = 1;
+    setf(m->since_date, sizeof m->since_date, "%s", r->since_date != NULL ? r->since_date : "");
+    for (i = 0; i < m->n; i++) {
+        item *it = &m->v[i];
+        char key[360];
+        int found = 0;
+
+        if (it->level < WEB_TIP)
+            continue;
+        issue_key(where(m, it), it->title, key, sizeof key);
+        for (j = 0; j < np; j++)
+            if (strcmp(prev[j].key, key) == 0) {
+                prev[j].seen = found = 1;
+            }
+        if (found) {
+            m->nstill++;
+        } else {
+            it->is_new = 1;
+            m->nnew++;
+        }
+    }
+    for (j = 0; j < np; j++) {
+        int dup = 0, k;
+
+        if (prev[j].seen)
+            continue;
+        for (k = 0; k < j; k++) /* the same problem listed twice last time */
+            dup |= !prev[k].seen && strcmp(prev[k].key, prev[j].key) == 0;
+        if (dup)
+            continue;
+        if (m->nfixed < SINCE_LIST)
+            setf(m->fixed[m->nfixed], sizeof m->fixed[0], "%s", prev[j].shown);
+        m->nfixed++;
+    }
+    free(prev);
+}
+
+static void write_since(FILE *out, const model *m)
+{
+    unsigned long i;
+
+    if (!m->since)
+        return;
+    fputs("<section class=\"since\"><h2>Since the last check-up", out);
+    if (m->since_date[0] != '\0') {
+        fputs(" (", out);
+        esc(out, m->since_date);
+        fputs(")", out);
+    }
+    fprintf(out, "</h2><div class=\"tiles\"><div class=\"tile ok\"><b>%lu</b><span>Fixed</span></div>"
+                 "<div class=\"tile new\"><b>%lu</b><span>New</span></div>"
+                 "<div class=\"tile still\"><b>%lu</b><span>Still open</span></div></div>",
+            m->nfixed, m->nnew, m->nstill);
+    if (m->nfixed > 0) {
+        fputs("<ul class=\"plain fixed\">", out);
+        for (i = 0; i < m->nfixed && i < SINCE_LIST; i++) {
+            fputs("<li><span class=\"badge ok\">Fixed</span> ", out);
+            esc(out, m->fixed[i]);
+            fputs("</li>", out);
+        }
+        if (m->nfixed > SINCE_LIST)
+            fprintf(out, "<li>and %lu more</li>", m->nfixed - SINCE_LIST);
+        fputs("</ul>", out);
+    } else if (m->nnew == 0 && m->nstill == 0) {
+        fputs("<p>Nothing to fix last time and nothing new this time.</p>", out);
+    }
+    if (m->nnew > 0)
+        fputs("<p class=\"meta\">Problems found for the first time are marked <span class=\"badge new\">"
+              "New</span> below.</p>", out);
+    fputs("</section>\n", out);
+}
+
 static const char CSS[] =
     ":root{--ink:#1d2433;--muted:#5b6475;--line:#e3e6ec;--bg:#ffffff;--soft:#f6f7f9;"
     "--imp:#b42318;--imp-bg:#fef3f2;--rec:#b54708;--rec-bg:#fffaeb;--tip:#175cd3;"
@@ -811,6 +983,9 @@ static const char CSS[] =
     ".badge.tip{background:var(--tip-bg);color:var(--tip)}"
     ".badge.ok{background:var(--ok-bg);color:var(--ok)}"
     ".badge.note{background:var(--note-bg);color:var(--note)}"
+    ".badge.new{background:#eef2ff;color:#4338ca;margin-left:6px}"
+    ".since .tiles{grid-template-columns:repeat(3,1fr)}.tile.new b{color:#4338ca}.tile.still b{color:var(--rec)}"
+    "ul.fixed{list-style:none;padding-left:0}ul.fixed li{margin:6px 0}"
     ".where{color:var(--muted);font-size:13px;margin-left:6px}"
     "table{width:100%;border-collapse:collapse;font-size:14px}"
     "td{padding:8px 6px;border-bottom:1px solid var(--line);vertical-align:top}"
@@ -830,6 +1005,8 @@ static void card(FILE *out, const model *m, const item *it)
 {
     fprintf(out, "<div class=\"card %s\"><span class=\"badge %s\">%s</span>",
             level_class(it->level), level_class(it->level), level_label(it->level));
+    if (it->is_new)
+        fputs("<span class=\"badge new\">New</span>", out);
     fputs("<span class=\"where\">", out);
     esc(out, where(m, it));
     fputs("</span><h4>", out);
@@ -885,9 +1062,9 @@ static void write_page(const model *m, const scan_report *r, const report_meta *
     esc(out, meta->client != NULL && meta->client[0] ? meta->client : "Safety check-up");
     fputs(" - Safety Check-up</title><style>", out);
     fputs(CSS, out);
-    fputs("</style></head><body><main class=\"page\">\n<header><div class=\"eyebrow\">"
-          "Website Safety Check-up</div><h1>",
-          out);
+    fprintf(out, "</style></head><body><main class=\"page\">\n<header><div class=\"eyebrow\">"
+                 "%s</div><h1>",
+            meta->monthly ? "Monthly Website Safety Check-up" : "Website Safety Check-up");
     esc(out, meta->client != NULL && meta->client[0] ? meta->client : "Safety check-up report");
     fputs("</h1><p class=\"meta\">", out);
     esc(out, meta->date);
@@ -936,6 +1113,7 @@ static void write_page(const model *m, const scan_report *r, const report_meta *
             "<div class=\"tile tip\"><b>%lu</b><span>Tips</span></div><div class=\"tile ok\">"
             "<b>%lu</b><span>Passed</span></div></div></section>\n",
             cnt[WEB_IMPORTANT], cnt[WEB_RECOMMENDED], cnt[WEB_TIP], cnt[WEB_OK]);
+    write_since(out, m);
 
     fputs("<h2>What to fix, most urgent first</h2>\n", out);
     any = 0;
@@ -1061,11 +1239,13 @@ static int build_model(const scan_report *r, model *m)
 
     memset(m, 0, sizeof *m);
     m->db = r->db;
+    m->monthly = r->monthly;
     for (i = 0; i < r->nhttp; i++)
         add_http(m, &r->http[i]);
     add_web_items(m);
     add_software(m);
     add_mail(m, r);
+    compare_since(m, r);
     for (i = 0; i < r->ntls; i++)
         add_tls(m, &r->tls[i]);
     add_code(m, r);
@@ -1094,6 +1274,12 @@ void report_summarize(const scan_report *r, report_summary *s)
     s->intercepted = m.intercepted;
     s->failed_targets = m.failed_targets;
     s->unfinished = m.unfinished || m.oom;
+    s->since = m.since;
+    s->nfixed = m.nfixed;
+    s->nnew = m.nnew;
+    s->nstill = m.nstill;
+    for (i = 0; i < m.nfixed && i < SINCE_LIST && i < 20; i++)
+        setf(s->fixed[i], sizeof s->fixed[i], "%s", m.fixed[i]);
     for (i = 0; i < m.n; i++)
         s->count[m.v[i].level]++;
     for (k = 0; k < 3; k++) /* issues only, worst first, the same order as the report */
@@ -1106,6 +1292,7 @@ void report_summarize(const scan_report *r, report_summary *s)
                 setf(it->title, sizeof it->title, "%s", m.v[i].title);
                 setf(it->fix, sizeof it->fix, "%s", m.v[i].fix);
                 setf(it->detail, sizeof it->detail, "%s", m.v[i].detail);
+                it->is_new = m.v[i].is_new;
             }
     free(m.s);
     free(m.v);
