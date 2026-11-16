@@ -16,7 +16,7 @@ It is read-only and defensive: it never logs in, attacks, guesses passwords or c
 
 ![New check-up](docs/screenshots/new-check-up.png)
 
-> **Only check what you own, or have written permission to check.** Website checks contact the site's server. Use them on your own sites, or on a client's site after they sign a permission form ([template](docs/permission-form.md)). The command line refuses network checks until you pass `--i-own-this`.
+> **Only check what you own, or have written permission to check.** Website checks contact the site's server. Use them on your own sites, or on a client's site after they sign a permission form: a [fillable PDF](docs/permission-form.pdf) (also under **Download permission form** in the app) or the [text version](docs/permission-form.md). The command line refuses network checks until you pass `--i-own-this`.
 
 ## Download and install
 
@@ -104,7 +104,7 @@ The desktop app and the installer (no further downloads: both are built with the
 powershell -NoProfile -ExecutionPolicy Bypass -File app\Build-App.ps1
 ```
 
-This writes a single-file `scanner.exe` (OpenSSL built in, file details from `src/scanner.rc`, `scripts/build_static.sh`), `ExposureScanner.exe`, `release\Exposure-Scanner-Setup.exe` and a portable zip. Add `-RefreshData` to download fresh security data into `data\vulndb.txt` first (about two minutes). `scripts\Make-OsMap.ps1` rebuilds `data\os_map.txt` from Launchpad and the CentOS/Rocky package trees. `app\Test-Setup.ps1` tests the installer in a temporary folder without changing the PC, and `ExposureScanner.exe --ui-snapshots <folder>` renders every screen to PNG.
+This writes a single-file `scanner.exe` (OpenSSL built in, file details from `src/scanner.rc`, `scripts/build_static.sh`), `ExposureScanner.exe`, `release\Exposure-Scanner-Setup.exe` and a portable zip. Add `-RefreshData` to download fresh security data into `data\vulndb.txt` first (about two minutes). `scripts\Make-OsMap.ps1` rebuilds `data\os_map.txt` from Launchpad and the CentOS/Rocky package trees, and `py scripts\make_permission_form.py` rebuilds the fillable `docs\permission-form.pdf` (needs `pip install reportlab`). `app\Test-Setup.ps1` tests the installer in a temporary folder without changing the PC, and `ExposureScanner.exe --ui-snapshots <folder>` renders every screen to PNG.
 
 ## Command line
 

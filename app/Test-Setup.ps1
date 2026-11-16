@@ -34,7 +34,7 @@ foreach ($exe in $details.Keys) {
 $env:ES_TEST_LINK_DIR = $links
 $p = Start-Process $setup -ArgumentList "--quiet --target `"$target`" --no-path --no-registry" -Wait -PassThru
 Check ($p.ExitCode -eq 0) "quiet install exit code 0 (was $($p.ExitCode))"
-foreach ($f in 'ExposureScanner.exe', 'scanner.exe', 'README.txt', 'LICENSE.txt', 'THIRD-PARTY-NOTICES.txt', 'data\advisories.txt',
+foreach ($f in 'ExposureScanner.exe', 'scanner.exe', 'README.txt', 'LICENSE.txt', 'THIRD-PARTY-NOTICES.txt', 'permission-form.pdf', 'data\advisories.txt',
                'data\spki_blocklist.txt', 'data\vulndb.txt', 'data\os_map.txt') {
     $ok = (Test-Path (Join-Path $target $f)) -and
           ((Get-FileHash (Join-Path $target $f)).Hash -eq (Get-FileHash (Join-Path $payload $f)).Hash)
@@ -71,7 +71,7 @@ if (Test-Path $zip) {
     $z = [IO.Compression.ZipFile]::OpenRead($zip)
     $names = $z.Entries | ForEach-Object { $_.FullName.Replace([string][char]92, '/') } # backslash -> slash
     $z.Dispose()
-    foreach ($f in 'ExposureScanner.exe', 'scanner.exe', 'README.txt', 'LICENSE.txt', 'THIRD-PARTY-NOTICES.txt', 'data/advisories.txt',
+    foreach ($f in 'ExposureScanner.exe', 'scanner.exe', 'README.txt', 'LICENSE.txt', 'THIRD-PARTY-NOTICES.txt', 'permission-form.pdf', 'data/advisories.txt',
                    'data/spki_blocklist.txt', 'data/vulndb.txt', 'data/os_map.txt') {
         Check ($names -contains $f) "portable zip contains $f"
     }

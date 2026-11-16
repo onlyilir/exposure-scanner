@@ -32,19 +32,20 @@ using Microsoft.Win32;
 [assembly: AssemblyProduct("Exposure Scanner")]
 [assembly: AssemblyCompany("onlyilir")]
 [assembly: AssemblyCopyright("Copyright (c) 2026 onlyilir. MIT License.")]
-[assembly: AssemblyVersion("0.9.0.0")]
-[assembly: AssemblyFileVersion("0.9.0.0")]
+[assembly: AssemblyVersion("0.9.1.0")]
+[assembly: AssemblyFileVersion("0.9.1.0")]
 
 namespace ExposureScanner
 {
     static class Program
     {
-        public const string Version = "0.9.0";
+        public const string Version = "0.9.1";
         public const string AppName = "Exposure Scanner";
         public const string ExeName = "ExposureScanner.exe";
         public const string RepoUrl = "https://github.com/onlyilir/exposure-scanner";
         public const string CoffeeUrl = "https://buymeacoffee.com/only.ilir";
-        public const string FormUrl = RepoUrl + "/blob/main/docs/permission-form.md";
+        public const string FormUrl = RepoUrl + "/blob/main/docs/permission-form.pdf";
+        public const string FormFile = "permission-form.pdf"; // ships next to the app
 
         [STAThread]
         static int Main(string[] args)
@@ -351,6 +352,7 @@ namespace ExposureScanner
                     new Action(() => Ui.Find<FrameworkElement>(w, "ScanTitle").BringIntoView()));
             };
             ShowScanAdvice(Snapshots.Active ? new List<string> { "Norton 360" } : new List<string>());
+            Ui.Find<Button>(w, "FormDownload").Click += delegate { SavePermissionForm(); };
             w.Loaded += delegate
             {
                 siteBox.Focus();
@@ -361,6 +363,47 @@ namespace ExposureScanner
                     Task a = FindAntivirus();
                 }
             };
+        }
+
+        // A copy of the fillable permission form, saved where the user chooses (Documents\Exposure
+        // Scanner\Forms by default, named after the client when one is typed in), then opened.
+        void SavePermissionForm()
+        {
+            string src = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, Program.FormFile);
+            if (!File.Exists(src))
+            {
+                Ui.Open(Program.FormUrl); // a copy run from a build folder: the one on GitHub
+                return;
+            }
+            string client = new string(clientBox.Text.Trim().Where(ch => !Path.GetInvalidFileNameChars().Contains(ch)).ToArray());
+            string dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "Exposure Scanner", "Forms");
+            var dlg = new SaveFileDialog
+            {
+                Title = "Save the permission form",
+                FileName = "Permission form" + (client.Length > 0 ? " - " + client : "") + ".pdf",
+                Filter = "Fillable PDF form (*.pdf)|*.pdf",
+                DefaultExt = ".pdf",
+                AddExtension = true,
+                OverwritePrompt = true
+            };
+            try
+            {
+                Directory.CreateDirectory(dir);
+                dlg.InitialDirectory = dir;
+            }
+            catch (Exception) { }
+            if (dlg.ShowDialog(w) != true)
+                return;
+            try
+            {
+                File.Copy(src, dlg.FileName, true);
+                Ui.Open(dlg.FileName);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(w, "The form could not be saved there.\n" + ex.Message, Program.AppName,
+                                MessageBoxButton.OK, MessageBoxImage.Warning);
+            }
         }
 
         // Which antivirus is installed (Windows Security Center), so the form can show its own steps
@@ -872,7 +915,7 @@ namespace ExposureScanner
             Ui.Find<TextBlock>(w, "AboutText").Text = Program.AppName + " " + Program.Version +
                 (listDate != null ? "  \u00B7  Known-problem list checked " + listDate : "") +
                 "  \u00B7  Reports are saved in " + ReportsDir;
-            Ui.Find<Button>(w, "FormButton").Click += delegate { Ui.Open(Program.FormUrl); };
+            Ui.Find<Button>(w, "FormButton").Click += delegate { SavePermissionForm(); };
             Ui.Find<Button>(w, "RepoButton").Click += delegate { Ui.Open(Program.RepoUrl); };
             Ui.Find<Button>(w, "CoffeeButton2").Click += delegate { Ui.Open(Program.CoffeeUrl); };
             ShowDataStatus(null);
@@ -995,13 +1038,14 @@ namespace ExposureScanner
                 try
                 {
                     await main.SnapshotAll(dir);
-                    foreach (bool un in new[] { false, true })
+                    foreach (string kind in new[] { "10-setup", "11-uninstall", "12-update" })
                     {
                         // a neutral example path, shown only; nothing is installed
-                        var s = new SetupController(un, @"C:\Users\you\AppData\Local\Programs\Exposure Scanner");
+                        var s = new SetupController(kind == "11-uninstall", @"C:\Users\you\AppData\Local\Programs\Exposure Scanner",
+                                                    kind == "12-update" ? "0.8.0" : null);
                         OffScreen(s.Window);
                         s.Window.Show();
-                        await s.SnapshotAll(dir, un ? "11-uninstall" : "10-setup");
+                        await s.SnapshotAll(dir, kind);
                         s.Window.Close();
                     }
                 }
@@ -1184,7 +1228,8 @@ namespace ExposureScanner
         }
 
         const string UninstallKey = @"Software\Microsoft\Windows\CurrentVersion\Uninstall\ExposureScanner";
-        static readonly string[] AppFiles = { Program.ExeName, "scanner.exe", "README.txt", "LICENSE.txt", "THIRD-PARTY-NOTICES.txt" };
+        static readonly string[] AppFiles = { Program.ExeName, "scanner.exe", "README.txt", "LICENSE.txt", "THIRD-PARTY-NOTICES.txt",
+                                              Program.FormFile };
         static readonly string[] DataFiles = { "advisories.txt", "spki_blocklist.txt", "vulndb.txt", "os_map.txt" };
 
         public class Options
@@ -1236,6 +1281,23 @@ namespace ExposureScanner
         public static bool IsInstalled(string target)
         {
             return File.Exists(Path.Combine(target, Program.ExeName));
+        }
+
+        // Version of the copy already in target ("0.8.0"), or null when there is none. Copies from
+        // before 0.8.0 carry no version details.
+        public static string InstalledVersion(string target)
+        {
+            if (!IsInstalled(target))
+                return null;
+            try
+            {
+                string v = FileVersionInfo.GetVersionInfo(Path.Combine(target, Program.ExeName)).ProductVersion ?? "";
+                Version parsed;
+                if (Version.TryParse(v, out parsed))
+                    return parsed.Build >= 0 ? parsed.ToString(3) : parsed.ToString(2);
+            }
+            catch (Exception) { }
+            return "an earlier version";
         }
 
         static bool SamePath(string a, string b)
@@ -1426,7 +1488,7 @@ namespace ExposureScanner
             {
                 k.SetValue("DisplayName", Program.AppName);
                 k.SetValue("DisplayVersion", Program.Version);
-                k.SetValue("Publisher", Program.AppName);
+                k.SetValue("Publisher", "onlyilir"); // the same name as in the programs' file details
                 k.SetValue("DisplayIcon", exe + ",0");
                 k.SetValue("InstallLocation", target);
                 k.SetValue("UninstallString", "\"" + exe + "\" --uninstall");
@@ -1472,12 +1534,15 @@ namespace ExposureScanner
         readonly Window w;
         readonly bool uninstall;
         readonly string target;
+        readonly string previous; // version this setup replaces, null for a new install
         bool deleteLater;
 
-        public SetupController(bool uninstall, string target)
+        // previousForSnapshot: --ui-snapshots shows an update without a copy installed
+        public SetupController(bool uninstall, string target, string previousForSnapshot = null)
         {
             this.uninstall = uninstall;
             this.target = target;
+            previous = uninstall ? null : previousForSnapshot ?? Installer.InstalledVersion(target);
             w = Window = (Window)Ui.Load("SetupWindow.xaml");
             var closeX = Ui.Find<Button>(w, "CloseX");
             closeX.Click += delegate { w.Close(); };
@@ -1486,7 +1551,7 @@ namespace ExposureScanner
             Ui.Find<TextBlock>(w, "LocationText").Text = target;
             w.Closed += delegate { if (deleteLater) Installer.DeleteFolderLater(target); };
 
-            bool update = !uninstall && Installer.IsInstalled(target);
+            bool update = previous != null;
             var go = Ui.Find<Button>(w, "GoButton");
             if (uninstall)
             {
@@ -1503,7 +1568,8 @@ namespace ExposureScanner
             else
             {
                 Ui.Find<TextBlock>(w, "HeadTitle").Text = update ? "Update Exposure Scanner" : "Install Exposure Scanner";
-                Ui.Find<TextBlock>(w, "HeadSub").Text = "Version " + Program.Version + "  \u00B7  for your Windows account";
+                Ui.Find<TextBlock>(w, "HeadSub").Text = "Version " + Program.Version +
+                    (update && previous != Program.Version ? "  \u00B7  replaces " + previous : "") + "  \u00B7  for your Windows account";
                 go.Content = update ? "Update" : "Install";
             }
             go.Click += delegate { Go(); };
@@ -1527,12 +1593,14 @@ namespace ExposureScanner
             Snapshots.Save(root, Path.Combine(dir, prefix + "-b-working.png"));
             Ui.Find<FrameworkElement>(w, "StepWork").Visibility = Visibility.Collapsed;
             Ui.Find<FrameworkElement>(w, "StepDone").Visibility = Visibility.Visible;
-            Ui.Find<TextBlock>(w, "DoneTitle").Text = uninstall ? "Uninstalled" : "Ready to go";
-            Ui.Find<TextBlock>(w, "DoneText").Text = uninstall
-                ? "Exposure Scanner has been removed. Your reports are still in Documents\\Exposure Scanner."
-                : "Find Exposure Scanner in the Start menu and on your desktop. To use the scanner command, open a new Command Prompt or PowerShell window.";
             if (uninstall)
+            {
+                Ui.Find<TextBlock>(w, "DoneTitle").Text = "Uninstalled";
+                Ui.Find<TextBlock>(w, "DoneText").Text = "Exposure Scanner has been removed. Your reports are still in Documents\\Exposure Scanner.";
                 Ui.Find<FrameworkElement>(w, "LaunchButton").Visibility = Visibility.Collapsed;
+            }
+            else
+                ShowDone(true, true);
             await Task.Delay(350);
             Snapshots.Save(root, Path.Combine(dir, prefix + "-c-done.png"));
         }
@@ -1586,12 +1654,27 @@ namespace ExposureScanner
                 Ui.Find<FrameworkElement>(w, "LaunchButton").Visibility = Visibility.Collapsed;
             }
             else
+                ShowDone(opt.Desktop, opt.AddPath);
+        }
+
+        // An update says which version it replaced, so nobody wonders whether the old copy is still there.
+        void ShowDone(bool desktop, bool addPath)
+        {
+            string where = "Find Exposure Scanner in the Start menu" + (desktop ? " and on your desktop" : "") + "." +
+                           (addPath ? " To use the scanner command, open a new Command Prompt or PowerShell window." : "");
+            var title = Ui.Find<TextBlock>(w, "DoneTitle");
+            var text = Ui.Find<TextBlock>(w, "DoneText");
+            if (previous == null)
             {
-                Ui.Find<TextBlock>(w, "DoneTitle").Text = "Ready to go";
-                Ui.Find<TextBlock>(w, "DoneText").Text =
-                    "Find Exposure Scanner in the Start menu" + (opt.Desktop ? " and on your desktop" : "") + "." +
-                    (opt.AddPath ? " To use the scanner command, open a new Command Prompt or PowerShell window." : "");
+                title.Text = "Ready to go";
+                text.Text = "Exposure Scanner " + Program.Version + " is installed. " + where;
+                return;
             }
+            bool same = previous == Program.Version;
+            title.Text = same ? "Reinstalled " + Program.Version : "Updated from " + previous + " to " + Program.Version;
+            text.Text = (same ? "Version " + Program.Version + " was installed again"
+                              : "Version " + previous + " was replaced by " + Program.Version) +
+                        " in the same place, so this PC has one copy. Your shortcuts, settings and reports are unchanged. " + where;
         }
     }
 }

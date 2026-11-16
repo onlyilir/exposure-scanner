@@ -2,7 +2,7 @@
 
 By signing this form, the client allows the checker to run a read-only safety check-up of the websites and code listed below, and nothing else.
 
-> Copy this into a document, fill in the blanks, and have both sides sign it before any check-up. It is a plain-language template, not legal advice. Rules on security checks differ by country, so have a local adviser look it over before relying on it for larger clients.
+> A fillable PDF of this form is in [permission-form.pdf](permission-form.pdf): type into it on screen, tick the boxes and sign, or print it. The desktop app saves a copy with **Download permission form**. Or copy this text into a document, fill in the blanks, and have both sides sign it before any check-up. It is a plain-language template, not legal advice. Rules on security checks differ by country, so have a local adviser look it over before relying on it for larger clients.
 
 ## Who this is between
 

@@ -78,6 +78,8 @@ If it saves you time: https://buymeacoffee.com/only.ilir
 '@
 Copy-Item (Join-Path $root 'LICENSE') (Join-Path $payload 'LICENSE.txt') -Force
 Copy-Item (Join-Path $root 'THIRD-PARTY-NOTICES.txt') (Join-Path $payload 'THIRD-PARTY-NOTICES.txt') -Force
+# the fillable permission form (built by scripts\make_permission_form.py; the app's Download button copies it)
+Copy-Item (Join-Path $root 'docs\permission-form.pdf') (Join-Path $payload 'permission-form.pdf') -Force
 Write-Output "App built: $payload (version $version)"
 if ($NoSetup) { return }
 
@@ -89,6 +91,7 @@ New-Item -ItemType Directory -Force -Path $stage | Out-Null
 $files = @{
     'ExposureScanner.exe' = 'ExposureScanner.exe'; 'scanner.exe' = 'scanner.exe'; 'README.txt' = 'README.txt'
     'LICENSE.txt' = 'LICENSE.txt'; 'THIRD-PARTY-NOTICES.txt' = 'THIRD-PARTY-NOTICES.txt'
+    'permission-form.pdf' = 'permission-form.pdf'
     'advisories.txt' = 'data\advisories.txt'; 'spki_blocklist.txt' = 'data\spki_blocklist.txt'
     'vulndb.txt' = 'data\vulndb.txt'; 'os_map.txt' = 'data\os_map.txt'
 }

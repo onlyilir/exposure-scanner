@@ -177,7 +177,12 @@
 
                 <TextBlock x:Name="FormError" Foreground="{StaticResource ImpFg}" FontSize="13" TextWrapping="Wrap" Margin="0,14,0,0" Visibility="Collapsed"/>
 
-                <StackPanel Orientation="Horizontal" Margin="0,26,0,0">
+                <Grid Margin="0,26,0,0">
+                  <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="*"/>
+                  </Grid.ColumnDefinitions>
                   <Button x:Name="RunButton" Style="{StaticResource PrimaryButton}" IsEnabled="False">
                     <StackPanel Orientation="Horizontal">
                       <TextBlock Text="Run check-up"/>
@@ -185,9 +190,18 @@
                             StrokeLineJoin="Round" Margin="10,0,0,0" VerticalAlignment="Center"/>
                     </StackPanel>
                   </Button>
-                  <TextBlock x:Name="RunHint" Style="{StaticResource Hint}" VerticalAlignment="Center" Margin="16,0,0,0"
-                             Text="Fill in the address and tick the permission box."/>
-                </StackPanel>
+                  <Button x:Name="FormDownload" Grid.Column="1" Style="{StaticResource SecondaryButton}" Margin="10,0,0,0"
+                          ToolTip="Save the fillable permission form (PDF) for your client to fill in and sign">
+                    <StackPanel Orientation="Horizontal">
+                      <Path Data="M6,0 L6,9 M2,5.5 L6,9.5 L10,5.5 M0,12.5 L12,12.5" Stroke="{StaticResource Ink}" StrokeThickness="1.7"
+                            StrokeStartLineCap="Round" StrokeEndLineCap="Round" StrokeLineJoin="Round" VerticalAlignment="Center"
+                            Margin="0,0,8,0"/>
+                      <TextBlock Text="Download permission form"/>
+                    </StackPanel>
+                  </Button>
+                  <TextBlock x:Name="RunHint" Grid.Column="2" Style="{StaticResource Hint}" VerticalAlignment="Center" Margin="16,0,0,0"
+                             TextWrapping="Wrap" Text="Fill in the address and tick the permission box."/>
+                </Grid>
               </StackPanel>
 
               <!-- running -->
@@ -429,7 +443,7 @@
               <TextBlock Style="{StaticResource Body}"
                          Text="Exposure Scanner is free under the MIT license. The source code, a permission form you can copy, and new versions are on GitHub. If it saves you time, you can buy the author a coffee."/>
               <WrapPanel Margin="0,16,0,0">
-                <Button x:Name="FormButton" Style="{StaticResource PrimaryButton}" Content="Permission form template" Margin="0,0,10,10"/>
+                <Button x:Name="FormButton" Style="{StaticResource PrimaryButton}" Content="Permission form (PDF)" Margin="0,0,10,10"/>
                 <Button x:Name="RepoButton" Style="{StaticResource SecondaryButton}" Content="Open on GitHub" Margin="0,0,10,10"/>
                 <Button x:Name="CoffeeButton2" Style="{StaticResource SecondaryButton}" Content="Buy me a coffee" Margin="0,0,10,10"/>
               </WrapPanel>
