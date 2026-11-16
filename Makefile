@@ -4,16 +4,16 @@
 CC ?= gcc
 WARN = -std=gnu99 -Wall -Wextra -Wpedantic -pthread
 LIB = src/version.c src/advisory.c src/fsutil.c src/gitindex.c src/secret_scan.c src/pysupply.c
-NET = src/net_compat.c src/tls_audit.c src/http_probe.c src/webcheck.c
+NET = src/net_compat.c src/tls_audit.c src/http_probe.c src/webcheck.c src/techdetect.c src/vulndb.c src/maildns.c
 ifeq ($(OS),Windows_NT)
-LDLIBS = -lssl -lcrypto -lws2_32 -lcrypt32
+LDLIBS = -lssl -lcrypto -lws2_32 -lcrypt32 -ldnsapi
 X = .exe
 else
-LDLIBS = -lssl -lcrypto
+LDLIBS = -lssl -lcrypto -lresolv
 X =
 endif
 # Some antivirus programs block exe names such as test_main.exe or unittests.exe; keep these names.
-BINS = runtests$(X) scantests$(X) nettests$(X) reporttests$(X) scanner$(X)
+BINS = runtests$(X) scantests$(X) nettests$(X) reporttests$(X) techtests$(X) scanner$(X)
 
 .PHONY: all test san clean
 
@@ -27,6 +27,7 @@ test: $(BINS)
 	./scantests$(X) data/advisories.txt
 	./nettests$(X) data/advisories.txt
 	./reporttests$(X) data/advisories.txt
+	./techtests$(X)
 	SCANNER=./scanner$(X) CHECKER=./reporttests$(X) NETTESTS=./nettests$(X) bash scripts/cli_check.sh
 
 runtests$(X): tests/test_main.c src/version.c src/advisory.c
@@ -36,6 +37,8 @@ scantests$(X): tests/test_scan.c $(LIB)
 nettests$(X): tests/test_net.c src/advisory.c src/version.c $(NET)
 	$(CC) $(WARN) -O1 -o $@ $^ $(LDLIBS)
 reporttests$(X): tests/test_report.c src/report.c src/report_html.c $(LIB) $(NET)
+	$(CC) $(WARN) -O1 -o $@ $^ $(LDLIBS)
+techtests$(X): tests/test_tech.c src/report.c src/report_html.c $(LIB) $(NET)
 	$(CC) $(WARN) -O1 -o $@ $^ $(LDLIBS)
 
 san:

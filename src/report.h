@@ -5,9 +5,11 @@
 #include <stdio.h>
 
 #include "http_probe.h"
+#include "maildns.h"
 #include "pysupply.h"
 #include "secret_scan.h"
 #include "tls_audit.h"
+#include "vulndb.h"
 
 #include "version_info.h"
 
@@ -25,6 +27,9 @@ typedef struct {
     size_t nhttp;
     tls_result *tls; /* ntls entries, owned by the report */
     size_t ntls;
+    const vulndb *db; /* security data for the software found on websites; NULL = none */
+    mail_result *mail; /* nmail entries (email spoofing protection per domain), owned */
+    size_t nmail;
 } scan_report;
 
 /* Per-module exit codes (0 clean, 1 findings, 2 error/no result); -1 when the module did
@@ -35,6 +40,10 @@ int report_rc_http(const scan_report *r);
 int report_rc_tls(const scan_report *r);
 /* Whole run: 1 if any module has findings, else 2 if any module failed, else 0. */
 int report_exit_code(const scan_report *r);
+
+/* Known holes in the site builders (WordPress, Next.js, ...) one target runs; 0 without data.
+   They count as findings, like banner matches. */
+unsigned long report_software_holes(const scan_report *r, const probe_result *p);
 
 /* Certificate flags that count as a finding (blocklisted, advisory issuer, expired). */
 int report_tls_cert_flagged(const tls_cert_info *c);

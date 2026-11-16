@@ -1039,7 +1039,7 @@ static void test_html(void)
     CHECK(w == 2);
     CHECK(balanced(s));
     CHECK(has(s, "Not ready to send"));
-    CHECK(has(s, "HTTPS inspection on this computer"));
+    CHECK(has(s, "HTTPS scanning on this computer"));
     CHECK(has(s, "1 address could not be reached"));
     CHECK(has(s, "Could not check http://rosas-bakery.example"));
     free(s);

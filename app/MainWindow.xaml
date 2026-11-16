@@ -150,7 +150,7 @@
                   </StackPanel>
                 </Grid>
 
-                <Border x:Name="NortonTip" Background="{StaticResource RecBg}" BorderBrush="{StaticResource RecLine}" BorderThickness="1"
+                <Border x:Name="ScanTip" Background="{StaticResource RecBg}" BorderBrush="{StaticResource RecLine}" BorderThickness="1"
                         CornerRadius="10" Padding="14,12" Margin="0,24,0,0">
                   <Grid>
                     <Grid.ColumnDefinitions>
@@ -160,10 +160,14 @@
                     <Path Data="M12,3 L22,20 L2,20 Z M12,9.5 L12,14 M12,17 L12,17.1" Stroke="{StaticResource RecFg}" StrokeThickness="1.8"
                           StrokeLineJoin="Round" StrokeStartLineCap="Round" StrokeEndLineCap="Round" Width="18" Height="18" Stretch="Uniform"
                           VerticalAlignment="Top" Margin="0,1,10,0"/>
-                    <TextBlock Grid.Column="1" FontSize="13" Foreground="#92400E" TextWrapping="Wrap" LineHeight="19">
-                      <Run FontWeight="SemiBold" Text="Pause HTTPS scanning in your antivirus first."/>
-                      <Run Text="Otherwise it replaces the site's certificate and that part of the report stays empty. In Norton: Security, Advanced Security, Web, Safe Web, Settings, HTTPS scanning."/>
-                    </TextBlock>
+                    <StackPanel Grid.Column="1">
+                      <TextBlock FontSize="13" Foreground="#92400E" TextWrapping="Wrap" LineHeight="19">
+                        <Run FontWeight="SemiBold" Text="Pause your antivirus's HTTPS scanning first, only that feature."/>
+                        <Run Text="Otherwise it swaps the site's certificate for its own and that part of the report stays empty."/>
+                      </TextBlock>
+                      <TextBlock x:Name="ScanTipSteps" FontSize="13" Foreground="#92400E" TextWrapping="Wrap" LineHeight="19" Margin="0,6,0,0"/>
+                      <Button x:Name="ScanTipHelp" Style="{StaticResource LinkButton}" Content="Steps for each antivirus" HorizontalAlignment="Left" Margin="0,6,0,0"/>
+                    </StackPanel>
                   </Grid>
                 </Border>
 
@@ -382,12 +386,30 @@
             <StackPanel x:Name="StepsPanel"/>
           </Border>
 
+          <TextBlock x:Name="ScanTitle" Text="Pause HTTPS scanning (not your antivirus)" Style="{StaticResource SectionTitle}" Margin="2,30,0,12"/>
+          <Border Style="{StaticResource CardBox}">
+            <StackPanel x:Name="ScanPanel"/>
+          </Border>
+
           <TextBlock Text="What gets checked" Style="{StaticResource SectionTitle}" Margin="2,30,0,12"/>
           <Border Style="{StaticResource CardBox}">
             <StackPanel>
-              <TextBlock Style="{StaticResource Body}" Text="Websites: whether visitors are sent to https, the security settings sent with each page, software versions the server reveals, and the certificate (trust, expiry, key strength, encryption version)."/>
+              <TextBlock Style="{StaticResource Body}" Text="Websites: whether visitors are sent to https, the security settings sent with each page, and the certificate (trust, expiry, key strength, encryption version)."/>
+              <TextBlock Style="{StaticResource Body}" Margin="0,10,0,0" Text="Software: which site builder runs the site (WordPress, Next.js, Drupal, Joomla, Magento, Ghost) and its version, the web server, PHP and the server's operating system. Each is checked for known security holes and for versions that no longer get updates. To find a hidden version, the check reads the home page and up to five public files any visitor could open, such as the news feed or the site's main script."/>
+              <TextBlock Style="{StaticResource Body}" Margin="0,10,0,0" Text="Email: the domain's public email records (SPF, DMARC and DKIM) that stop scammers from sending email in the business's name. Only DNS is read; no email is sent."/>
               <TextBlock Style="{StaticResource Body}" Margin="0,10,0,0" Text="Code folders: passwords, keys and tokens left in files, and Python packages with known malicious versions."/>
-              <TextBlock Style="{StaticResource Body}" Margin="0,10,0,0" Foreground="{StaticResource Muted}" Text="Not covered: pages behind a login, break-in attempts, software the server does not announce, live certificate revocation. A clean report is not a guarantee."/>
+              <TextBlock Style="{StaticResource Body}" Margin="0,10,0,0" Foreground="{StaticResource Muted}" Text="Not covered: pages behind a login, break-in attempts, plugins and themes, software that hides its version everywhere, live certificate revocation. A clean report is not a guarantee."/>
+            </StackPanel>
+          </Border>
+
+          <TextBlock Text="Security data" Style="{StaticResource SectionTitle}" Margin="2,30,0,12"/>
+          <Border Style="{StaticResource CardBox}">
+            <StackPanel>
+              <TextBlock Style="{StaticResource Body}" Text="Known security holes and end-of-life dates come from public lists: WordPress.org, the US vulnerability database (NVD), OSV.dev, CISA's list of holes attackers are using, and endoflife.date. The app refreshes them once a week. Only the names of the lists are requested; nothing about you or your checks is sent."/>
+              <TextBlock x:Name="DataStatus" Style="{StaticResource Body}" Margin="0,10,0,0" Foreground="{StaticResource Muted}"/>
+              <WrapPanel Margin="0,16,0,0">
+                <Button x:Name="DataButton" Style="{StaticResource SecondaryButton}" Content="Update now" Margin="0,0,10,10"/>
+              </WrapPanel>
             </StackPanel>
           </Border>
 

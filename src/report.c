@@ -44,7 +44,7 @@ int report_rc_http(const scan_report *r)
     if (r->nhttp == 0)
         return -1;
     for (i = 0; i < r->nhttp; i++) {
-        hits += r->http[i].nhit;
+        hits += r->http[i].nhit + (report_software_holes(r, &r->http[i]) > 0);
         failed += http_failed(&r->http[i]);
     }
     return hits > 0 ? 1 : failed == r->nhttp ? 2 : 0;
@@ -91,7 +91,7 @@ unsigned long report_count_findings(const scan_report *r)
     if (r->run_py)
         n += (unsigned long)r->py.n;
     for (i = 0; i < r->nhttp; i++)
-        n += (unsigned long)r->http[i].nhit;
+        n += (unsigned long)r->http[i].nhit + report_software_holes(r, &r->http[i]);
     for (i = 0; i < r->ntls; i++)
         n += (unsigned long)tls_flagged_certs(&r->tls[i]);
     return n;
@@ -131,6 +131,28 @@ static const char *rc_word(int rc)
     return rc == 0 ? "clean" : rc == 1 ? "findings" : "error";
 }
 
+static void print_software(const scan_report *r, const probe_result *p, FILE *out)
+{
+    int k;
+
+    for (k = 0; k < p->tech.n; k++) {
+        const tech_item *t = &p->tech.t[k];
+        vdb_assess a;
+
+        vdb_assess_item(r->db, t, &a);
+        fprintf(out, "  software: %s %s (%s, %s)", tech_name(t->product), t->version[0] ? t->version : "?",
+                tech_conf_name(t->conf), t->source);
+        if (a.nhole > 0)
+            fprintf(out, " - %lu known hole(s), worst %s%s%s%s", a.nhole, vdb_sev_name(a.worst),
+                    a.kev ? ", used by attackers" : "", a.fix_to[0] ? ", fixed in " : "", a.fix_to);
+        if (a.eol == 1)
+            fprintf(out, " - release line %s is end of life", a.cycle);
+        if (a.os_name[0] != '\0')
+            fprintf(out, " - OS: %s%s", a.os_name, a.os_eol == 1 ? (a.os_ext ? " (paid support only)" : " (end of life)") : "");
+        fputc('\n', out);
+    }
+}
+
 void report_print_text(const scan_report *r, FILE *out)
 {
     int multi = modules_run(r) > 1;
@@ -156,6 +178,7 @@ void report_print_text(const scan_report *r, FILE *out)
         header(out, multi, "http banners and website settings", NULL);
         for (i = 0; i < r->nhttp; i++) {
             probe_print(&r->http[i], out);
+            print_software(r, &r->http[i], out);
             hits += r->http[i].nhit;
             failed += http_failed(&r->http[i]);
         }
@@ -176,6 +199,17 @@ void report_print_text(const scan_report *r, FILE *out)
             if (i > 0)
                 fputc('\n', out);
             tls_result_print(&r->tls[i], out);
+        }
+    }
+    if (r->nmail > 0) {
+        header(out, multi, "email spoofing protection (DNS)", NULL);
+        for (i = 0; i < r->nmail; i++) {
+            web_check c[MAIL_MAX_CHECKS];
+            int n = mail_grade(&r->mail[i], c, MAIL_MAX_CHECKS), k;
+
+            fprintf(out, "%s%s\n", r->mail[i].domain, r->mail[i].has_mx ? " (receives email)" : "");
+            for (k = 0; k < n; k++)
+                fprintf(out, "  %-11s %s: %s\n", web_level_name(c[k].level), mail_title(&c[k]), c[k].detail);
         }
     }
     if (multi) {
@@ -390,6 +424,96 @@ static void json_py(const scan_report *r, FILE *out)
     fputc('}', out);
 }
 
+/* known holes in the site builders a target runs (0 without security data) */
+unsigned long report_software_holes(const scan_report *r, const probe_result *p)
+{
+    unsigned long n = 0;
+    int k;
+
+    for (k = 0; r->db != NULL && k < p->tech.n; k++) {
+        vdb_assess a;
+
+        if (!(p->tech.t[k].flags & TECH_SITE))
+            continue;
+        vdb_assess_item(r->db, &p->tech.t[k], &a);
+        n += a.nhole;
+    }
+    return n;
+}
+
+static const char *eol_word(int e)
+{
+    return e == 1 ? "yes" : e == 0 ? "no" : "unknown";
+}
+
+static void json_software(const scan_report *r, const probe_result *p, FILE *out)
+{
+    int k, j;
+
+    fputc('[', out);
+    for (k = 0; k < p->tech.n; k++) {
+        const tech_item *t = &p->tech.t[k];
+        vdb_assess a;
+        int g = 1;
+
+        vdb_assess_item(r->db, t, &a);
+        if (k > 0)
+            fputc(',', out);
+        fputc('{', out);
+        kv_str(out, &g, "product", t->product);
+        kv_str(out, &g, "name", tech_name(t->product));
+        kv_opt(out, &g, "version", t->version);
+        kv_str(out, &g, "confidence", tech_conf_name(t->conf));
+        kv_str(out, &g, "kind", (t->flags & TECH_SITE) ? "site" : "server");
+        kv_str(out, &g, "seen_in", t->source);
+        if (t->flags & TECH_APP_ROUTER)
+            kv_bool(out, &g, "app_router", 1);
+        kv_opt(out, &g, "os_tag", t->os);
+        if (r->db == NULL) {
+            fputc('}', out);
+            continue;
+        }
+        kv_ulong(out, &g, "known_holes", a.nhole);
+        if (a.nhole > 0) {
+            int h;
+
+            kv_str(out, &g, "worst", vdb_sev_name(a.worst));
+            kv_bool(out, &g, "used_by_attackers", a.kev);
+            kv_opt(out, &g, "fix_to", a.fix_to);
+            key(out, &g, "holes");
+            fputc('[', out);
+            for (j = 0; j < a.ntop; j++) {
+                if (j > 0)
+                    fputc(',', out);
+                h = 1;
+                fputc('{', out);
+                kv_str(out, &h, "id", a.top[j].id);
+                kv_str(out, &h, "severity", vdb_sev_name(a.top[j].sev));
+                kv_bool(out, &h, "used_by_attackers", a.top[j].kev);
+                kv_opt(out, &h, "fixed", a.top[j].fixed);
+                kv_opt(out, &h, "url", a.top[j].url);
+                kv_opt(out, &h, "summary", a.top[j].summary);
+                fputc('}', out);
+            }
+            fputc(']', out);
+        }
+        kv_opt(out, &g, "wordpress_org_status", a.wp_status);
+        kv_opt(out, &g, "release_line", a.cycle);
+        kv_str(out, &g, "end_of_life", eol_word(a.eol));
+        kv_opt(out, &g, "end_of_life_date", a.eol_date);
+        kv_opt(out, &g, "newest", a.newest);
+        if (a.os_name[0] != '\0') {
+            kv_str(out, &g, "os", a.os_name);
+            kv_str(out, &g, "os_end_of_life", eol_word(a.os_eol));
+            kv_opt(out, &g, "os_end_of_life_date", a.os_eol_date);
+            if (a.os_ext)
+                kv_opt(out, &g, "os_paid_support_until", a.os_ext_date);
+        }
+        fputc('}', out);
+    }
+    fputc(']', out);
+}
+
 static void json_http(const scan_report *r, FILE *out)
 {
     int f = 1, g, h, j;
@@ -453,7 +577,10 @@ static void json_http(const scan_report *r, FILE *out)
             kv_opt(out, &h, "advisory_url", p->hit[j].url);
             fputc('}', out);
         }
-        fputs("]}", out);
+        fputc(']', out);
+        key(out, &g, "software");
+        json_software(r, p, out);
+        fputc('}', out);
     }
     fputc(']', out);
     kv_str(out, &f, "note",
@@ -579,9 +706,9 @@ static void json_summary(const scan_report *r, FILE *out, int *f)
     h = 1;
     if (s->intercepted) {
         key_less(out, &h);
-        report_json_string(out, "HTTPS inspection on this computer replaced the certificate. "
-                                "Pause HTTPS scanning (for example Norton Safe Web) and run "
-                                "the check again.");
+        report_json_string(out, "HTTPS scanning on this computer (an antivirus or network filter) "
+                                "swapped the site's certificate. Turn off only that feature, run the "
+                                "check again, then turn it back on.");
     }
     if (s->failed_targets > 0) {
         key_less(out, &h);
@@ -637,6 +764,48 @@ void report_print_json(const scan_report *r, const char *command, FILE *out)
         key(out, &f, "tls");
         json_tls(r, out);
     }
+    if (r->nmail > 0) {
+        size_t i;
+
+        key(out, &f, "email");
+        fputc('[', out);
+        for (i = 0; i < r->nmail; i++) {
+            const mail_result *m = &r->mail[i];
+            web_check c[MAIL_MAX_CHECKS];
+            int n = mail_grade(m, c, MAIL_MAX_CHECKS), k, g = 1;
+
+            fputs(i > 0 ? ",{" : "{", out);
+            kv_str(out, &g, "domain", m->domain);
+            kv_bool(out, &g, "answered", m->answered);
+            kv_bool(out, &g, "receives_email", m->has_mx);
+            kv_opt(out, &g, "spf", m->spf);
+            kv_opt(out, &g, "dmarc", m->dmarc);
+            kv_opt(out, &g, "dkim_selectors", m->dkim);
+            key(out, &g, "checks");
+            fputc('[', out);
+            for (k = 0; k < n; k++) {
+                int h = 1;
+
+                fputs(k > 0 ? ",{" : "{", out);
+                kv_str(out, &h, "id", c[k].id);
+                kv_str(out, &h, "level", web_level_name(c[k].level));
+                kv_str(out, &h, "title", mail_title(&c[k]));
+                kv_str(out, &h, "detail", c[k].detail);
+                fputc('}', out);
+            }
+            fputs("]}", out);
+        }
+        fputc(']', out);
+    }
+    if (r->nhttp > 0 && r->db != NULL) {
+        int g = 1;
+
+        key(out, &f, "security_data");
+        fputc('{', out);
+        kv_opt(out, &g, "generated", r->db->generated);
+        kv_ulong(out, &g, "known_holes", r->db->nvuln);
+        fputc('}', out);
+    }
     kv_ulong(out, &f, "findings", report_count_findings(r));
     if (r->nhttp > 0) {
         int g = 1;
@@ -659,5 +828,6 @@ void report_free(scan_report *r)
     py_report_free(&r->py);
     free(r->http);
     free(r->tls);
+    free(r->mail);
     memset(r, 0, sizeof *r);
 }

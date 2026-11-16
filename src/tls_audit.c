@@ -146,10 +146,14 @@ void spki_blocklist_free(spki_blocklist *bl)
 
 const char *tls_detect_interception(const char *s)
 {
+    /* antivirus HTTPS scanning first, then company filters and debugging proxies, then wording
+       that only such local certificate authorities use (specific names win) */
     static const char *const names[] = {
-        "Norton Web/Mail Shield", "Kaspersky", "ESET SSL Filter", "Avast Web/Mail Shield",
-        "AVG Web/Mail Shield", "Bitdefender", "Zscaler", "Fortinet", "Sophos", "Cisco Umbrella",
-        "Blue Coat", "mitmproxy", "Fiddler", NULL};
+        "Norton Web/Mail Shield", "Avast Web/Mail Shield", "AVG Web/Mail Shield", "Kaspersky",
+        "ESET SSL Filter", "Bitdefender", "Zscaler", "Fortinet", "FortiGate", "Sophos",
+        "Cisco Umbrella", "Blue Coat", "Netskope", "Forcepoint", "Cloudflare for Teams",
+        "Gateway CA - Cloudflare", "PortSwigger", "Charles Proxy", "mitmproxy", "Fiddler",
+        "DO_NOT_TRUST", "Web/Mail Shield", "SSL Filter", "Personal Root", NULL};
     int i;
 
     for (i = 0; names[i] != NULL; i++)

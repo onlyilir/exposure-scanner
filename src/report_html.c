@@ -16,6 +16,8 @@ typedef struct {
     char platform[24]; /* hosting platform id, from the https answer when there is one */
     web_check web[SITE_WEB];
     int nweb;
+    tech_list tech; /* software, merged across the site's addresses */
+    int fetched;
 } site;
 
 typedef struct {
@@ -35,6 +37,7 @@ typedef struct {
     int oom;
     /* operator warnings */
     int intercepted, failed_targets, unfinished;
+    const vulndb *db;
 } model;
 
 /* ---------- building ---------- */
@@ -181,6 +184,8 @@ static void spaced_list(char *dst, size_t n, const char *src)
     dst[o] = '\0';
 }
 
+static void merge_tech(tech_list *l, const tech_item *t);
+
 static void add_http(model *m, const probe_result *p)
 {
     int si = find_site(m, p->t.host), j;
@@ -199,6 +204,9 @@ static void add_http(model *m, const probe_result *p)
     }
     for (j = 0; j < p->nweb; j++)
         merge_web(&m->s[si], &p->web[j]);
+    for (j = 0; j < p->tech.n; j++)
+        merge_tech(&m->s[si].tech, &p->tech.t[j]);
+    m->s[si].fetched += p->fetched;
     if (p->platform[0] != '\0' && (p->t.tls || m->s[si].platform[0] == '\0'))
         setf(m->s[si].platform, sizeof m->s[si].platform, "%s", p->platform);
     for (j = 0; j < p->nhit; j++) {
@@ -253,6 +261,271 @@ static void add_web_items(model *m)
     }
 }
 
+/* ---------- software the site runs (techdetect.h + vulndb.h) ---------- */
+
+static const char *const WHY_HOLES =
+    "Attackers run automated tools that find sites on versions with published holes and break in, "
+    "often within days of the news. Some holes let them change pages or take over the site "
+    "without a password.";
+static const char *const WHY_EOL =
+    "Its makers no longer fix security problems in this version, so every hole found from now on "
+    "stays open.";
+static const char *const WHY_OS =
+    "The server's operating system no longer gets security updates, so holes in it and in the "
+    "software it runs stay open.";
+static const char *const WHY_HIDDEN =
+    "Most break-ins use holes that already have a fix, on sites that have not installed it yet.";
+
+/* keep the most certain version of each product across the site's addresses */
+static void merge_tech(tech_list *l, const tech_item *t)
+{
+    int i;
+
+    for (i = 0; i < l->n; i++)
+        if (strcmp(l->t[i].product, t->product) == 0) {
+            tech_item *o = &l->t[i];
+            int flags = o->flags | t->flags;
+
+            if (t->version[0] != '\0' && (o->version[0] == '\0' || t->conf > o->conf)) {
+                char os[16], rel[8];
+
+                memcpy(os, o->os, sizeof os);
+                memcpy(rel, o->os_release, sizeof rel);
+                *o = *t;
+                if (o->os[0] == '\0') {
+                    memcpy(o->os, os, sizeof os);
+                    memcpy(o->os_release, rel, sizeof rel);
+                }
+            } else if (o->os[0] == '\0') {
+                memcpy(o->os, t->os, sizeof o->os);
+                memcpy(o->os_release, t->os_release, sizeof o->os_release);
+            }
+            o->flags = flags;
+            return;
+        }
+    if (l->n < TECH_MAX)
+        l->t[l->n++] = *t;
+}
+
+/* "2025-05-31" -> "31 May 2025" */
+static void nice_date(const char *iso, char *out, size_t n)
+{
+    static const char *const mon[] = {"Jan", "Feb", "Mar", "Apr", "May", "Jun",
+                                      "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"};
+    int y, mo, d;
+
+    if (sscanf(iso, "%d-%d-%d", &y, &mo, &d) == 3 && mo >= 1 && mo <= 12)
+        setf(out, n, "%d %s %d", d, mon[mo - 1], y);
+    else
+        setf(out, n, "%s", iso);
+}
+
+static int years_ago(const char *iso, int years)
+{
+    char limit[16];
+    int y, mo, d;
+
+    if (iso[0] == '\0' || sscanf(vdb_today(), "%d-%d-%d", &y, &mo, &d) != 3)
+        return 0;
+    setf(limit, sizeof limit, "%04d-%02d-%02d", y - years, mo, d);
+    return strcmp(iso, limit) <= 0;
+}
+
+static void ver_label(const tech_item *t, char *out, size_t n)
+{
+    if (t->version[0] == '\0')
+        setf(out, n, "%s", tech_name(t->product));
+    else
+        setf(out, n, "%s %s%s", tech_name(t->product), t->version, t->conf == TECH_EXACT ? "" : " (estimated)");
+}
+
+static void append(char *out, size_t n, const char *fmt, const char *a)
+{
+    size_t l = strlen(out);
+
+    setf(out + l, n - l, fmt, a);
+}
+
+static void update_advice(const tech_item *t, const vdb_assess *a, char *out, size_t n)
+{
+    const char *to = a->fix_to[0] ? a->fix_to : a->newest;
+    const char *p = t->product;
+
+    if (to[0] == '\0')
+        setf(out, n, "Update %s to its newest version.", tech_name(p));
+    else if (strcmp(p, "wordpress") == 0)
+        setf(out, n, "Update WordPress to %s or later (Dashboard > Updates) and turn on automatic updates "
+             "for WordPress itself.", to);
+    else if (strcmp(p, "nextjs") == 0)
+        setf(out, n, "Ask the developer to update Next.js to %s or later, rebuild and redeploy the site.", to);
+    else if (strcmp(p, "drupal") == 0)
+        setf(out, n, "Update Drupal core to %s or later (Reports > Available updates) and follow Drupal's "
+             "security announcements.", to);
+    else if (strcmp(p, "joomla") == 0)
+        setf(out, n, "Update Joomla to %s or later (System > Update > Joomla).", to);
+    else if (strcmp(p, "magento") == 0)
+        setf(out, n, "Install Adobe's security update: Magento %s or later.", to);
+    else
+        setf(out, n, "Update %s to %s or later.", tech_name(p), to);
+    if (a->newest[0] != '\0' && a->fix_to[0] != '\0' && strcmp(a->newest, a->fix_to) != 0)
+        append(out, n, " The newest in this line is %s.", a->newest);
+    if (t->conf != TECH_EXACT)
+        append(out, n, " The version was estimated from %s; confirm it in the site's admin area.", t->source);
+}
+
+static void site_item(model *m, int si, const tech_item *t)
+{
+    char label[80], d1[24];
+    vdb_assess a;
+    item *it;
+
+    vdb_assess_item(m->db, t, &a);
+    ver_label(t, label, sizeof label);
+    if (t->version[0] == '\0') {
+        if ((it = add_item(m, WEB_TIP, si, "%s found; its version is hidden", tech_name(t->product))) != NULL) {
+            setf(it->detail, sizeof it->detail, "seen in: %s", t->source);
+            it->why = WHY_HIDDEN;
+            setf(it->fix, sizeof it->fix, "Check in the site's admin area that %s has no pending updates%s%s.",
+                 tech_name(t->product), a.newest[0] ? "; the newest version is " : "", a.newest);
+        }
+        return;
+    }
+    if (a.nhole > 0) {
+        int level = a.kev || a.worst >= VDB_SEV_HIGH ? WEB_IMPORTANT
+                  : a.worst == VDB_SEV_LOW ? WEB_TIP : WEB_RECOMMENDED;
+        char det[300] = "";
+        int k;
+
+        if (t->conf != TECH_EXACT && !a.kev && level > WEB_TIP)
+            level--;
+        if (a.nkev > 0)
+            it = add_item(m, level, si, "%s %s %lu known security %s, %lu used by attackers", label,
+                          t->conf == TECH_EXACT ? "has" : "may have", a.nhole, a.nhole == 1 ? "hole" : "holes",
+                          a.nkev);
+        else
+            it = add_item(m, level, si, "%s %s %lu known security %s", label,
+                          t->conf == TECH_EXACT ? "has" : "may have", a.nhole, a.nhole == 1 ? "hole" : "holes");
+        if (it != NULL) {
+            for (k = 0; k < a.ntop && strlen(det) < 200; k++) {
+                size_t l = strlen(det);
+
+                setf(det + l, sizeof det - l, "%s%s (%s%s)", k ? "; " : "", a.top[k].id,
+                     vdb_sev_name(a.top[k].sev), a.top[k].kev ? ", used by attackers" : "");
+            }
+            setf(it->detail, sizeof it->detail, "%s%s. Seen in: %s", det,
+                 a.nhole > (unsigned long)a.ntop ? " and more" : "", t->source);
+            it->why = WHY_HOLES;
+            update_advice(t, &a, it->fix, sizeof it->fix);
+        }
+    } else if (strcmp(a.wp_status, "insecure") == 0) {
+        if ((it = add_item(m, WEB_RECOMMENDED, si, "WordPress.org lists %s as insecure", label)) != NULL) {
+            setf(it->detail, sizeof it->detail, "seen in: %s", t->source);
+            it->why = WHY_HOLES;
+            update_advice(t, &a, it->fix, sizeof it->fix);
+        }
+    } else if (a.known && a.eol != 1) {
+        if ((it = add_item(m, WEB_OK, si, "%s: no known security holes", label)) != NULL)
+            setf(it->detail, sizeof it->detail, "checked against the security data from %s; seen in: %s",
+                 m->db != NULL && m->db->generated[0] ? m->db->generated : "the app", t->source);
+    }
+    if (a.eol == 1) {
+        nice_date(a.eol_date, d1, sizeof d1);
+        if ((it = add_item(m, years_ago(a.eol_date, 2) ? WEB_IMPORTANT : WEB_RECOMMENDED, si,
+                           "%s %s no longer gets security fixes", tech_name(t->product), a.cycle)) != NULL) {
+            setf(it->detail, sizeof it->detail, "support ended%s%s; seen in: %s", d1[0] ? " on " : "", d1, t->source);
+            it->why = WHY_EOL;
+            setf(it->fix, sizeof it->fix, "Move to a supported version of %s%s%s.", tech_name(t->product),
+                 a.newest[0] ? ", for example " : "", a.newest);
+        }
+    }
+}
+
+/* server software: when a distribution tag says which operating system, its support decides */
+static void server_item(model *m, int si, const tech_item *t)
+{
+    char label[80], d1[24], d2[24];
+    vdb_assess a;
+    item *it;
+
+    vdb_assess_item(m->db, t, &a);
+    ver_label(t, label, sizeof label);
+    if (a.os_name[0] != '\0' && a.os_eol == 1) {
+        nice_date(a.os_eol_date, d1, sizeof d1);
+        nice_date(a.os_ext_date, d2, sizeof d2);
+        it = add_item(m, a.os_ext ? WEB_RECOMMENDED : WEB_IMPORTANT, si,
+                      a.os_ext ? "The server runs %s, which is past its normal support"
+                               : "The server runs %s, which no longer gets security updates", a.os_name);
+        if (it != NULL) {
+            setf(it->detail, sizeof it->detail, "worked out from %s in the %s; support ended%s%s%s%s", label,
+                 t->source, d1[0] ? " on " : "", d1, a.os_ext ? "; paid extended support runs until " : "",
+                 a.os_ext ? d2 : "");
+            it->why = WHY_OS;
+            setf(it->fix, sizeof it->fix, "%s", a.os_ext
+                 ? "Ask your host whether paid extended security updates are active for this server, and plan "
+                   "the move to a supported release."
+                 : "Ask your host to move the site to a server with a supported operating system.");
+        }
+    } else if (a.os_name[0] != '\0' && a.os_eol == 0) {
+        nice_date(a.os_eol_date, d1, sizeof d1);
+        if ((it = add_item(m, WEB_OK, si, "The server's operating system still gets updates")) != NULL)
+            setf(it->detail, sizeof it->detail, "%s, worked out from %s%s%s", a.os_name, label,
+                 d1[0] ? "; supported until " : "", d1);
+    } else if (strcmp(t->product, "iis") == 0 && strcmp(t->version, "10.0") == 0 && a.os_eol_date[0]) {
+        nice_date(a.os_eol_date, d1, sizeof d1);
+        if ((it = add_item(m, WEB_TIP, si, "Check which Windows Server version runs the site")) != NULL) {
+            setf(it->detail, sizeof it->detail, "%s means Windows Server 2016 or newer; 2016 gets updates until %s",
+                 label, d1);
+            setf(it->fix, sizeof it->fix, "If the server runs Windows Server 2016, plan the move to a newer "
+                 "version before %s.", d1);
+        }
+    } else if (t->version[0] != '\0' && a.eol == 1 && a.os_name[0] == '\0') {
+        int level = strcmp(t->product, "php") != 0 ? WEB_TIP
+                  : years_ago(a.eol_date, 2) ? WEB_IMPORTANT : WEB_RECOMMENDED;
+
+        nice_date(a.eol_date, d1, sizeof d1);
+        if ((it = add_item(m, level, si, "%s %s no longer gets security fixes from its makers",
+                           tech_name(t->product), a.cycle)) != NULL) {
+            setf(it->detail, sizeof it->detail, "%s in the %s; support ended%s%s", label, t->source,
+                 d1[0] ? " on " : "", d1);
+            it->why = WHY_EOL;
+            setf(it->fix, sizeof it->fix, "Ask your host to update %s to a supported version%s%s. If it comes "
+                 "with the server's operating system, its vendor may still patch it: ask them to confirm.",
+                 tech_name(t->product), a.newest[0] ? " such as " : "", a.newest);
+        }
+    }
+}
+
+static void add_software(model *m)
+{
+    int si, i;
+
+    for (si = 0; si < m->ns; si++) {
+        const site *s = &m->s[si];
+        char label[80], list[220] = "";
+        item *it;
+
+        if (s->tech.n == 0)
+            continue;
+        for (i = 0; i < s->tech.n; i++) {
+            ver_label(&s->tech.t[i], label, sizeof label);
+            append(list, sizeof list, i ? ", %s" : "%s", label);
+        }
+        if ((it = add_item(m, WEB_NOTE, si, "Software found: %s", list)) != NULL) {
+            if (s->fetched > 0)
+                setf(it->detail, sizeof it->detail, "read from the home page, its headers and %d more public %s",
+                     s->fetched, s->fetched == 1 ? "file" : "files");
+            else
+                setf(it->detail, sizeof it->detail, "read from the home page and its headers");
+        }
+        for (i = 0; i < s->tech.n; i++) {
+            if (s->tech.t[i].flags & TECH_SITE)
+                site_item(m, si, &s->tech.t[i]);
+            else
+                server_item(m, si, &s->tech.t[i]);
+        }
+    }
+}
+
 static void add_tls(model *m, const tls_result *t)
 {
     int si = find_site(m, t->host), i, expired = 0, weak = 0, ca = 0;
@@ -275,7 +548,7 @@ static void add_tls(model *m, const tls_result *t)
         it = add_item(m, WEB_NOTE, si, "Certificate not checked");
         if (it != NULL)
             setf(it->detail, sizeof it->detail,
-                     "HTTPS inspection on the checking computer (%s) replaced the certificate",
+                     "HTTPS scanning on the checking computer (%s) swapped the site's certificate",
                      t->interception);
         return;
     }
@@ -629,9 +902,10 @@ static void write_page(const model *m, const scan_report *r, const report_meta *
               "again.</strong><ul>",
               out);
         if (m->intercepted)
-            fputs("<li>HTTPS inspection on this computer (for example an antivirus web shield) "
-                  "replaced the site's certificate, so certificate results are missing. Pause "
-                  "HTTPS scanning or use another computer.</li>",
+            fputs("<li>HTTPS scanning on this computer (an antivirus or network filter) swapped the "
+                  "site's certificate, so certificate results are missing. Turn off only that "
+                  "feature in the antivirus (not the antivirus itself), or use another computer or "
+                  "network.</li>",
                   out);
         if (m->failed_targets > 0)
             fprintf(out, "<li>%d %s could not be reached. Check the address and your "
@@ -752,15 +1026,46 @@ static void write_page(const model *m, const scan_report *r, const report_meta *
     fputs(".</footer>\n</main></body></html>\n", out);
 }
 
+/* email spoofing protection, under the website of the same name */
+static void add_mail(model *m, const scan_report *r)
+{
+    size_t i;
+
+    for (i = 0; i < r->nmail; i++) {
+        const mail_result *mr = &r->mail[i];
+        web_check c[MAIL_MAX_CHECKS];
+        int si = find_site(m, mr->domain), n, k;
+
+        if (si < 0)
+            continue;
+        n = mail_grade(mr, c, MAIL_MAX_CHECKS);
+        for (k = 0; k < n; k++) {
+            const mail_info *info = mail_check_info(c[k].id);
+            item *it = add_item(m, c[k].level, si, "%s", mail_title(&c[k]));
+
+            if (it == NULL || info == NULL)
+                continue;
+            setf(it->detail, sizeof it->detail, "%s", c[k].detail);
+            if (c[k].level >= WEB_TIP) {
+                it->why = info->why;
+                setf(it->fix, sizeof it->fix, "%s", info->fix);
+            }
+        }
+    }
+}
+
 /* operator warnings ("not ready to send"); returns how many */
 static int build_model(const scan_report *r, model *m)
 {
     size_t i;
 
     memset(m, 0, sizeof *m);
+    m->db = r->db;
     for (i = 0; i < r->nhttp; i++)
         add_http(m, &r->http[i]);
     add_web_items(m);
+    add_software(m);
+    add_mail(m, r);
     for (i = 0; i < r->ntls; i++)
         add_tls(m, &r->tls[i]);
     add_code(m, r);

@@ -6,7 +6,8 @@
 typedef struct {
     unsigned long part[VER_MAX_PARTS];
     int count; /* number of numeric components parsed */
-    int pre;   /* 1 if a pre-release tag (alpha/beta/rc/dev/pre) follows */
+    int pre;   /* 1 if a pre-release tag (alpha/beta/rc/dev/pre/canary) follows */
+    unsigned long post; /* Magento-style patch release: "2.4.7-p3" -> 3, else 0 */
 } ver_t;
 
 /* Parse a dotted numeric version ("1.2.3", "v8.2.35", "1.0rc1").
@@ -16,7 +17,7 @@ typedef struct {
 int ver_parse(const char *s, ver_t *out);
 
 /* Numeric, component-wise compare; missing components count as 0 and a
-   pre-release sorts below the same release. Returns <0, 0 or >0. */
+   pre-release sorts below the same release, a "-pN" patch release above it. Returns <0, 0 or >0. */
 int ver_cmp(const ver_t *a, const ver_t *b);
 
 #endif

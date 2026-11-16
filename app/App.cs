@@ -32,14 +32,14 @@ using Microsoft.Win32;
 [assembly: AssemblyProduct("Exposure Scanner")]
 [assembly: AssemblyCompany("onlyilir")]
 [assembly: AssemblyCopyright("Copyright (c) 2026 onlyilir. MIT License.")]
-[assembly: AssemblyVersion("0.8.0.0")]
-[assembly: AssemblyFileVersion("0.8.0.0")]
+[assembly: AssemblyVersion("0.9.0.0")]
+[assembly: AssemblyFileVersion("0.9.0.0")]
 
 namespace ExposureScanner
 {
     static class Program
     {
-        public const string Version = "0.8.0";
+        public const string Version = "0.9.0";
         public const string AppName = "Exposure Scanner";
         public const string ExeName = "ExposureScanner.exe";
         public const string RepoUrl = "https://github.com/onlyilir/exposure-scanner";
@@ -55,6 +55,8 @@ namespace ExposureScanner
             if (!uninstall)
                 install = true;
 #endif
+            if (args.Contains("--update-data")) // refresh the security data (also used by Build-App.ps1)
+                return VulnData.Cli(ArgValue(args, "--out"));
             string target = ArgValue(args, "--target") ?? Installer.DefaultTarget;
 
             if (args.Contains("--quiet") && (install || uninstall))
@@ -223,7 +225,7 @@ namespace ExposureScanner
         readonly CheckBox permBox;
         readonly Button runButton;
         readonly TextBlock runHint, formError, runningTitle, runningStep, pdfStatus;
-        readonly FrameworkElement formPanel, runningPanel, siteFields, folderFields, nortonTip;
+        readonly FrameworkElement formPanel, runningPanel, siteFields, folderFields, scanTip;
         readonly RadioButton modeSite, navCheck, navReports, navHelp;
         readonly FrameworkElement[] pages;
         string lastReport;
@@ -255,7 +257,7 @@ namespace ExposureScanner
             runningPanel = Ui.Find<FrameworkElement>(w, "RunningPanel");
             siteFields = Ui.Find<FrameworkElement>(w, "SiteFields");
             folderFields = Ui.Find<FrameworkElement>(w, "FolderFields");
-            nortonTip = Ui.Find<FrameworkElement>(w, "NortonTip");
+            scanTip = Ui.Find<FrameworkElement>(w, "ScanTip");
             modeSite = Ui.Find<RadioButton>(w, "ModeSite");
             navCheck = Ui.Find<RadioButton>(w, "NavCheck");
             navReports = Ui.Find<RadioButton>(w, "NavReports");
@@ -342,14 +344,39 @@ namespace ExposureScanner
             Validate();
             Ui.Find<Button>(w, "CoffeeButton").Click += delegate { Ui.Open(Program.CoffeeUrl); };
             Ui.Find<Button>(w, "UpdateButton").Click += delegate { Ui.Open(Program.RepoUrl + "/releases/latest"); };
+            Ui.Find<Button>(w, "ScanTipHelp").Click += delegate
+            {
+                navHelp.IsChecked = true;
+                w.Dispatcher.BeginInvoke(DispatcherPriority.Loaded,
+                    new Action(() => Ui.Find<FrameworkElement>(w, "ScanTitle").BringIntoView()));
+            };
+            ShowScanAdvice(Snapshots.Active ? new List<string> { "Norton 360" } : new List<string>());
             w.Loaded += delegate
             {
                 siteBox.Focus();
                 if (!Snapshots.Active)
                 {
                     Task t = CheckForUpdate();
+                    Task d = RefreshData(false);
+                    Task a = FindAntivirus();
                 }
             };
+        }
+
+        // Which antivirus is installed (Windows Security Center), so the form can show its own steps
+        // for pausing HTTPS scanning. Read once, off the UI thread.
+        List<string> antivirus = new List<string>();
+
+        async Task FindAntivirus()
+        {
+            List<string> found = await Task.Run(() => HttpsScanning.Installed());
+            ShowScanAdvice(found);
+        }
+
+        void ShowScanAdvice(List<string> found)
+        {
+            antivirus = found;
+            Ui.Find<TextBlock>(w, "ScanTipSteps").Text = HttpsScanning.AdviceFor(found);
         }
 
         void ShowPage(int n)
@@ -364,7 +391,7 @@ namespace ExposureScanner
         {
             siteFields.Visibility = site ? Visibility.Visible : Visibility.Collapsed;
             folderFields.Visibility = site ? Visibility.Collapsed : Visibility.Visible;
-            nortonTip.Visibility = site ? Visibility.Visible : Visibility.Collapsed;
+            scanTip.Visibility = site ? Visibility.Visible : Visibility.Collapsed;
             Ui.Find<TextBlock>(w, "PermText").Text = site
                 ? "The owner of this website has signed the permission form."
                 : "This is my folder, or its owner has given me permission to scan it.";
@@ -565,6 +592,10 @@ namespace ExposureScanner
                 text.Text = warnings != null && warnings.Length > 0
                     ? string.Join(" ", warnings.Select(o => o as string).Where(s => s != null))
                     : "Something went wrong during the check. Run it again.";
+                // the certificate was swapped: say how to pause that feature in the antivirus on this PC
+                var known = antivirus.Select(HttpsScanning.Find).Where(p => p != null).Distinct().ToList();
+                if (text.Text.Contains("HTTPS scanning") && known.Count > 0)
+                    text.Text += " " + string.Join(" ", known.Select(p => "On this PC: " + p.Name + ". " + p.Steps));
             }
 
             string verdict;
@@ -775,7 +806,7 @@ namespace ExposureScanner
         {
             string[][] steps = {
                 new[] { "Get permission", "Send the client the permission form and get it signed. Never check a site without it." },
-                new[] { "Pause HTTPS scanning", "In Norton: Security \u203A Advanced Security \u203A Web \u203A Safe Web \u203A Settings \u203A HTTPS scanning. Turn it back on afterwards." },
+                new[] { "Pause HTTPS scanning", "Turn off only your antivirus's HTTPS scanning, not the antivirus itself. The steps for each antivirus are below. Turn it back on afterwards." },
                 new[] { "Run the check-up", "Enter the website, the client's name and yours, tick the permission box and press Run check-up." },
                 new[] { "Check the result", "If it says Not ready to send, fix what it says and run it again." },
                 new[] { "Send the PDF", "Press Save as PDF and email the file to your client." }
@@ -808,6 +839,31 @@ namespace ExposureScanner
                 g.Children.Add(text);
                 panel.Children.Add(g);
             }
+            // pausing HTTPS scanning, per antivirus
+            var scan = Ui.Find<StackPanel>(w, "ScanPanel");
+            Func<string, bool, TextBlock> para = (s, muted) => new TextBlock
+            {
+                Text = s, FontSize = 13.5, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 12, 0, 0),
+                Foreground = muted ? Ui.Res("Muted") : Ui.Res("Ink")
+            };
+            var why = para(HttpsScanning.Why, false);
+            why.Margin = new Thickness(0);
+            scan.Children.Add(why);
+            foreach (HttpsScanning.Product p in HttpsScanning.Products)
+            {
+                var row = new StackPanel { Margin = new Thickness(0, 14, 0, 0) };
+                row.Children.Add(new TextBlock { Text = p.Name, FontSize = 14, FontWeight = FontWeights.SemiBold });
+                row.Children.Add(new TextBlock
+                {
+                    Text = p.Steps, FontSize = 13.5, Foreground = Ui.Res("Muted"), TextWrapping = TextWrapping.Wrap,
+                    Margin = new Thickness(0, 3, 0, 0)
+                });
+                scan.Children.Add(row);
+            }
+            foreach (string s in new[] { HttpsScanning.Defender, HttpsScanning.Other, HttpsScanning.Work,
+                                         HttpsScanning.Firewall, HttpsScanning.After })
+                scan.Children.Add(para(s, true));
+
             Ui.Find<TextBlock>(w, "CliExamples").Text =
                 "scanner site shop.com --i-own-this --html report.html\n" +
                 "scanner secrets C:\\code\\my-project\n" +
@@ -819,6 +875,54 @@ namespace ExposureScanner
             Ui.Find<Button>(w, "FormButton").Click += delegate { Ui.Open(Program.FormUrl); };
             Ui.Find<Button>(w, "RepoButton").Click += delegate { Ui.Open(Program.RepoUrl); };
             Ui.Find<Button>(w, "CoffeeButton2").Click += delegate { Ui.Open(Program.CoffeeUrl); };
+            ShowDataStatus(null);
+            Ui.Find<Button>(w, "DataButton").Click += async delegate { await RefreshData(true); };
+        }
+
+        // Security data (vulndb.txt): shipped in data\, refreshed weekly into %LOCALAPPDATA%;
+        // scanner.exe uses whichever copy is newer.
+        static DateTime? DataDate()
+        {
+            DateTime? a = VulnData.Generated(VulnData.UserFile);
+            DateTime? b = VulnData.Generated(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "data", VulnData.FileName));
+            return a == null ? b : b == null || a > b ? a : b;
+        }
+
+        void ShowDataStatus(string text)
+        {
+            DateTime? d = DataDate();
+            Ui.Find<TextBlock>(w, "DataStatus").Text = text ?? (d == null
+                ? "No security data yet: press Update now."
+                : "Last updated " + d.Value.ToLocalTime().ToString("d MMMM yyyy", En) + ".");
+        }
+
+        bool updatingData;
+
+        // Weekly on start-up (silent), or when the user presses Update now (about a minute: NVD
+        // allows a few requests per minute without a key).
+        async Task RefreshData(bool manual)
+        {
+            DateTime? d = DataDate();
+            if (updatingData || (!manual && d != null && DateTime.UtcNow - d.Value < TimeSpan.FromDays(7)))
+                return;
+            updatingData = true;
+            var button = Ui.Find<Button>(w, "DataButton");
+            button.IsEnabled = false;
+            ShowDataStatus("Updating the security data...");
+            Action<string> progress = s => w.Dispatcher.BeginInvoke(new Action(() =>
+                ShowDataStatus("Updating the security data: " + s + "...")));
+            string error = await Task.Run(() =>
+            {
+                try
+                {
+                    VulnData.Update(VulnData.UserFile, progress);
+                    return null;
+                }
+                catch (Exception ex) { return ex.Message; }
+            });
+            updatingData = false;
+            button.IsEnabled = true;
+            ShowDataStatus(error == null ? null : "The update did not finish (" + error + "). The last data is still used.");
         }
 
         // "Verified 2026-10-23" in the header of data\advisories.txt -> "23 October 2026"
@@ -942,7 +1046,7 @@ namespace ExposureScanner
         {
             return @"{""summary"":{""important"":2,""recommended"":3,""tip"":2,""passed"":5,""ready_to_send"":" +
                    (ready ? "true,\"warnings\":[]" :
-                    "false,\"warnings\":[\"HTTPS inspection on this computer replaced the certificate. Pause HTTPS scanning (for example Norton Safe Web) and run the check again.\"]") +
+                    "false,\"warnings\":[\"HTTPS scanning on this computer (an antivirus or network filter) swapped the site's certificate. Turn off only that feature, run the check again, then turn it back on.\"]") +
                    @",""issues"":[
 {""level"":""important"",""site"":""rosas-bakery.example"",""title"":""Possibly outdated software with a known security problem: PHP 8.2.20"",""fix"":""Ask your host to confirm the version and update to a fixed release (8.2.35, 8.3.36, 8.4.27, 8.5.12)."",""detail"":""Reported in the X-Powered-By header.""},
 {""level"":""important"",""site"":""rosas-bakery.example"",""title"":""The certificate expires in 9 days"",""fix"":""Ask your host to renew it before that date and to turn on automatic renewal."",""detail"":""Valid until Nov  1 08:00:00 2026 GMT""},
@@ -1081,7 +1185,7 @@ namespace ExposureScanner
 
         const string UninstallKey = @"Software\Microsoft\Windows\CurrentVersion\Uninstall\ExposureScanner";
         static readonly string[] AppFiles = { Program.ExeName, "scanner.exe", "README.txt", "LICENSE.txt", "THIRD-PARTY-NOTICES.txt" };
-        static readonly string[] DataFiles = { "advisories.txt", "spki_blocklist.txt" };
+        static readonly string[] DataFiles = { "advisories.txt", "spki_blocklist.txt", "vulndb.txt", "os_map.txt" };
 
         public class Options
         {
@@ -1217,6 +1321,16 @@ namespace ExposureScanner
                     File.Delete(Path.Combine(settings, "settings.txt"));
                     if (Directory.Exists(settings) && Directory.GetFileSystemEntries(settings).Length == 0)
                         Directory.Delete(settings);
+                }
+                catch (Exception) { }
+                // and the refreshed security data (%LOCALAPPDATA%\Exposure Scanner)
+                string cache = Path.GetDirectoryName(VulnData.UserFile);
+                try
+                {
+                    File.Delete(VulnData.UserFile);
+                    File.Delete(VulnData.UserFile + ".new");
+                    if (Directory.Exists(cache) && Directory.GetFileSystemEntries(cache).Length == 0)
+                        Directory.Delete(cache);
                 }
                 catch (Exception) { }
             }

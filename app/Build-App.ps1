@@ -3,8 +3,8 @@
 #   release\payload\                          ExposureScanner.exe, scanner.exe, data\, read-me, licenses
 #   release\Exposure-Scanner-Setup.exe         the app built with /define:SETUP and the payload inside it
 #   release\Exposure-Scanner-<ver>-portable.zip
-# Usage: powershell -NoProfile -ExecutionPolicy Bypass -File app\Build-App.ps1 [-SkipEngine] [-NoSetup]
-param([switch]$SkipEngine, [switch]$NoSetup)
+# Usage: powershell -NoProfile -ExecutionPolicy Bypass -File app\Build-App.ps1 [-SkipEngine] [-NoSetup] [-RefreshData]
+param([switch]$SkipEngine, [switch]$NoSetup, [switch]$RefreshData)
 $ErrorActionPreference = 'Stop'
 $app = $PSScriptRoot
 $root = Split-Path -Parent $app
@@ -31,7 +31,7 @@ if (-not (Test-Path (Join-Path $app 'app.ico'))) {
 $fw = Join-Path $env:WINDIR 'Microsoft.NET\Framework64\v4.0.30319'
 $csc = Join-Path $fw 'csc.exe'
 $refs = @('WPF\PresentationFramework.dll', 'WPF\PresentationCore.dll', 'WPF\WindowsBase.dll', 'System.Xaml.dll',
-          'System.Web.Extensions.dll', 'Microsoft.CSharp.dll', 'System.Core.dll', 'System.dll') |
+          'System.Web.Extensions.dll', 'System.Management.dll', 'Microsoft.CSharp.dll', 'System.Core.dll', 'System.dll') |
         ForEach-Object { '/reference:' + (Join-Path $fw $_) }
 function Invoke-Csc([string]$out, [string[]]$extra) {
     $cscArgs = @('/nologo', '/target:winexe', '/optimize+', '/codepage:65001', '/warn:4', ('/out:' + $out),
@@ -40,14 +40,21 @@ function Invoke-Csc([string]$out, [string[]]$extra) {
                  ('/resource:' + (Join-Path $app 'Styles.xaml') + ',Styles.xaml'),
                  ('/resource:' + (Join-Path $app 'MainWindow.xaml') + ',MainWindow.xaml'),
                  ('/resource:' + (Join-Path $app 'SetupWindow.xaml') + ',SetupWindow.xaml')) + $extra + $refs +
-               @((Join-Path $app 'App.cs'))
+               @((Join-Path $app 'App.cs'), (Join-Path $app 'VulnData.cs'), (Join-Path $app 'HttpsScanning.cs'))
     & $csc @cscArgs
     if ($LASTEXITCODE -ne 0) { throw "Build of $out failed." }
 }
 Invoke-Csc (Join-Path $payload 'ExposureScanner.exe') @()
 
 # 4. data, a short read-me and the licenses
-Copy-Item (Join-Path $root 'data\advisories.txt'), (Join-Path $root 'data\spki_blocklist.txt') (Join-Path $payload 'data') -Force
+#    -RefreshData first downloads the latest security data into data\vulndb.txt (about a minute)
+if ($RefreshData) {
+    $p = Start-Process (Join-Path $payload 'ExposureScanner.exe') -Wait -PassThru `
+        -ArgumentList ('--update-data --out "' + (Join-Path $root 'data\vulndb.txt') + '"')
+    if ($p.ExitCode -ne 0) { throw "Security data update failed; see $env:TEMP\ExposureScanner-update.log" }
+}
+Copy-Item (Join-Path $root 'data\advisories.txt'), (Join-Path $root 'data\spki_blocklist.txt'),
+          (Join-Path $root 'data\vulndb.txt'), (Join-Path $root 'data\os_map.txt') (Join-Path $payload 'data') -Force
 Set-Content -Path (Join-Path $payload 'README.txt') -Encoding ASCII -Value @'
 Exposure Scanner
 ================
@@ -83,6 +90,7 @@ $files = @{
     'ExposureScanner.exe' = 'ExposureScanner.exe'; 'scanner.exe' = 'scanner.exe'; 'README.txt' = 'README.txt'
     'LICENSE.txt' = 'LICENSE.txt'; 'THIRD-PARTY-NOTICES.txt' = 'THIRD-PARTY-NOTICES.txt'
     'advisories.txt' = 'data\advisories.txt'; 'spki_blocklist.txt' = 'data\spki_blocklist.txt'
+    'vulndb.txt' = 'data\vulndb.txt'; 'os_map.txt' = 'data\os_map.txt'
 }
 $resArgs = @()
 foreach ($name in $files.Keys) {

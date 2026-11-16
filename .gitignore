@@ -2,7 +2,7 @@
 *.exe
 *.o
 release/
-san_*
+/san_*
 
 # local working files
 HANDOVER.md

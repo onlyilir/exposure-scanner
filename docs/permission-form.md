@@ -30,8 +30,9 @@ Only the items written here are checked. Anything not listed is out of bounds.
 The check-up only reads what each website already sends to every visitor. For each website, the checker:
 
 - Makes one normal page request, the same as opening the home page in a browser.
+- When it is needed to read a software version, opens up to five more public files that any visitor's browser could open, such as the site's news feed or its main script file.
 - Makes one secure-connection check, the same step a browser takes before it shows the padlock.
-- Reads the security settings the site sends with its pages, its certificate (who issued it and when it expires), its encryption version, and any software version numbers the server shows.
+- Reads the security settings the site sends with its pages, its certificate (who issued it and when it expires), its encryption version, and which software runs the site (for example WordPress and its version, the web server and its operating system). It compares those versions with public lists of known security problems and of versions that no longer get updates.
 
 For a code folder or repository, the checker reads the files for passwords, keys and tokens that should not be there. It also checks for software packages with known harmful versions.
 
@@ -74,7 +75,7 @@ The results belong to the client and go only to the people named on this form.
 
 A clean report means no problems were found in the checks listed above. It does not mean the website is fully secure.
 
-- Software versions are read from what the server says about itself, which can be hidden or wrong. Those results are marked "possible" in the report.
+- Software versions are read from what the website shows, which can be hidden or wrong. Versions worked out from hints are marked "estimated" in the report, so the client can confirm them in the site's admin area.
 - The checker gives advice. The client, or the client's web developer, decides what to change and makes the changes.
 - The checker's total responsibility is limited to the fee paid for the check-up.
 

@@ -300,6 +300,10 @@ static void test_blocklist(void)
 
     CHECK(tls_detect_interception("CN=Norton Web/Mail Shield Root,O=Norton Web/Mail Shield") != NULL);
     CHECK(tls_detect_interception("CN=ISRG Root X1,O=Internet Security Research Group") == NULL);
+    CHECK(strcmp(tls_detect_interception("CN=Avast Web/Mail Shield Root"), "Avast Web/Mail Shield") == 0);
+    CHECK(tls_detect_interception("CN=Gateway CA - Cloudflare Managed G1") != NULL);
+    CHECK(tls_detect_interception("CN=Cloudflare Inc ECC CA-3,O=Cloudflare, Inc.") == NULL);
+    CHECK(tls_detect_interception("CN=Example Security SSL Filter CA") != NULL);
 }
 
 static void test_tls(const adv_list *adv)

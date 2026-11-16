@@ -44,6 +44,49 @@ static const char *data_file(const char *name, char *buf, size_t n)
 #endif
     return buf;
 }
+/* "2026-11-16" from the G line of a security data file, "" if none */
+static void data_date(const char *path, char *out, size_t n)
+{
+    FILE *f = fopen(path, "rb");
+    char line[256];
+
+    out[0] = '\0';
+    if (f == NULL)
+        return;
+    while (fgets(line, sizeof line, f) != NULL)
+        if (line[0] == 'G' && line[1] == '\t') {
+            snprintf(out, n, "%.10s", line + 2);
+            break;
+        }
+    fclose(f);
+}
+
+/* Security data for the software found on websites: --vulndb, else the newer of the copy the
+   desktop app refreshes (%LOCALAPPDATA%\Exposure Scanner) and the one shipped in data\. Missing
+   data is not an error: software is then listed without known holes. */
+static void load_vulndb(const char *given, vulndb *db)
+{
+    static char shipped[600], osmap[600], user[600];
+    const char *path = given;
+
+    if (path == NULL) {
+        char d1[16], d2[16];
+        const char *local = getenv("LOCALAPPDATA");
+
+        path = data_file("vulndb.txt", shipped, sizeof shipped);
+        if (local != NULL) {
+            snprintf(user, sizeof user, "%s\\Exposure Scanner\\vulndb.txt", local);
+            data_date(user, d1, sizeof d1);
+            data_date(shipped, d2, sizeof d2);
+            if (d1[0] != '\0' && strcmp(d1, d2) >= 0)
+                path = user;
+        }
+    }
+    if (vdb_load(db, path) != 0)
+        fprintf(stderr, "note: no security data (%s); software is listed without known holes\n", path);
+    vdb_load(db, data_file("os_map.txt", osmap, sizeof osmap));
+}
+
 #define MAX_TLS_TARGETS 16
 
 /* option groups a command accepts */
@@ -74,14 +117,14 @@ static const struct {
 typedef struct {
     int cmd;
     unsigned opts;
-    const char *dir, *adv_path, *bl_path, *ca;
+    const char *dir, *adv_path, *bl_path, *ca, *vdb_path;
     const char *html_path, *client, *by;
     probe_target http[PROBE_MAX_TARGETS];
     size_t nhttp;
     probe_target tls[MAX_TLS_TARGETS];
     size_t ntls;
     probe_opts po;
-    int owned, json;
+    int owned, json, no_email;
 } cli_args;
 
 static void usage(void)
@@ -101,7 +144,13 @@ static void usage(void)
             "\n"
             "`site` checks one website: http:// and https:// (HTTPS redirect, security headers,\n"
             "software versions) plus its certificate. A redirect to the same site (www. or not)\n"
-            "is followed once; redirects to other hosts are never followed.\n"
+            "is followed once; redirects to other hosts are never followed. The home page and,\n"
+            "when needed, up to 5 public files (feed, main script, version file) show which\n"
+            "software runs the site (WordPress, Next.js, Drupal, Joomla, Magento, Ghost, the\n"
+            "server and its operating system). Known holes and end-of-life dates come from the\n"
+            "local security data (data/vulndb.txt, or --vulndb <file>). It also reads the\n"
+            "domain's public email records (SPF, DMARC, DKIM) for spoofing protection;\n"
+            "--no-email skips that.\n"
             "\n"
             "Read-only and defensive. Network commands send ordinary requests only; use them\n"
             "ONLY on hosts you own or are authorized to test. Every network check (`site`,\n"
@@ -238,8 +287,12 @@ static int parse_args(int argc, char **argv, cli_args *c)
             c->json = 1;
         } else if (strcmp(s, "--i-own-this") == 0 && (c->opts & O_OWN)) {
             c->owned = 1;
+        } else if (strcmp(s, "--no-email") == 0 && (c->cmd == CMD_SITE || c->cmd == CMD_ALL)) {
+            c->no_email = 1;
         } else if ((v = opt_val(c, argc, argv, &a, "--advisories", O_ADV)) != NULL) {
             c->adv_path = v;
+        } else if ((v = opt_val(c, argc, argv, &a, "--vulndb", O_ADV)) != NULL) {
+            c->vdb_path = v;
         } else if ((v = opt_val(c, argc, argv, &a, "--rate", O_NET)) != NULL) {
             if (parse_int_opt(v, 0, 60000, &c->po.rate_ms) != 0) {
                 fprintf(stderr, "error: bad --rate\n");
@@ -385,6 +438,33 @@ static int follow_redirects(cli_args *c, const adv_list *adv, scan_report *rep)
 }
 
 /* Runs the modules the arguments ask for. 0 ok, -1 out of memory. */
+/* Email spoofing protection (public DNS records only) for each website's own domain, www.
+   and the bare name counted once; shared hosting domains and addresses are skipped. */
+static int check_mail(const cli_args *c, scan_report *rep)
+{
+    char seen[PROBE_MAX_TARGETS][128];
+    size_t n = 0, i, j;
+
+    for (i = 0; i < c->nhttp; i++) {
+        const char *h = c->http[i].host;
+
+        if (strncasecmp(h, "www.", 4) == 0 && h[4] != '\0')
+            h += 4;
+        for (j = 0; j < n && strcasecmp(seen[j], h) != 0; j++)
+            ;
+        if (j == n && mail_wanted(h))
+            snprintf(seen[n++], sizeof seen[0], "%s", h);
+    }
+    if (n == 0)
+        return 0;
+    if ((rep->mail = calloc(n, sizeof *rep->mail)) == NULL)
+        return -1;
+    for (i = 0; i < n; i++)
+        mail_check(seen[i], &rep->mail[i]); /* failures are recorded in the result */
+    rep->nmail = n;
+    return 0;
+}
+
 static int run(cli_args *c, const adv_list *adv, const spki_blocklist *bl, scan_report *rep)
 {
     size_t i;
@@ -407,6 +487,8 @@ static int run(cli_args *c, const adv_list *adv, const spki_blocklist *bl, scan_
         if (probe_run(c->http, c->nhttp, &c->po, adv, rep->http) != 0)
             return -1;
         if ((c->cmd == CMD_SITE || c->cmd == CMD_ALL) && follow_redirects(c, adv, rep) != 0)
+            return -1;
+        if ((c->cmd == CMD_SITE || c->cmd == CMD_ALL) && !c->no_email && check_mail(c, rep) != 0)
             return -1;
     }
     if (c->ntls > 0) {
@@ -496,6 +578,7 @@ int main(int argc, char **argv)
     static char adv_default[600];
     adv_list adv = {0};
     spki_blocklist bl = {0};
+    vulndb vdb = {0};
     scan_report rep;
     size_t i;
     int rc;
@@ -515,6 +598,7 @@ int main(int argc, char **argv)
     c.po.timeout_ms = 5000;
     c.po.rate_ms = 200;
     c.po.threads = 8;
+    c.po.level2 = 1;
     if (parse_args(argc, argv, &c) != 0)
         return 2;
 
@@ -558,6 +642,10 @@ int main(int argc, char **argv)
     }
 
     memset(&rep, 0, sizeof rep);
+    if (c.nhttp > 0) {
+        load_vulndb(c.vdb_path, &vdb);
+        rep.db = &vdb;
+    }
     if (run(&c, &adv, &bl, &rep) != 0) {
         fprintf(stderr, "error: out of memory\n");
         rc = 2;
@@ -571,6 +659,7 @@ int main(int argc, char **argv)
             rc = 2;
     }
     report_free(&rep);
+    vdb_free(&vdb);
     adv_free(&adv);
     spki_blocklist_free(&bl);
     if (c.nhttp + c.ntls > 0)

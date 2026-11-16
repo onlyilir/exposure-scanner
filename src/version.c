@@ -54,9 +54,12 @@ int ver_parse(const char *s, ver_t *out)
         t++;
     if (has_prefix_ci(t, "alpha") || has_prefix_ci(t, "beta") ||
         has_prefix_ci(t, "rc") || has_prefix_ci(t, "dev") ||
-        has_prefix_ci(t, "pre"))
+        has_prefix_ci(t, "pre") || has_prefix_ci(t, "canary"))
         out->pre = 1;
-    else if ((tolower((unsigned char)t[0]) == 'a' || tolower((unsigned char)t[0]) == 'b') &&
+    else if ((t[0] == 'p' || t[0] == 'P') && isdigit((unsigned char)t[1]) && t > s) {
+        for (t++; isdigit((unsigned char)*t) && out->post < 100000; t++)
+            out->post = out->post * 10 + (unsigned long)(*t - '0');
+    } else if ((tolower((unsigned char)t[0]) == 'a' || tolower((unsigned char)t[0]) == 'b') &&
              isdigit((unsigned char)t[1]))
         out->pre = 1;
     return 0;
@@ -75,5 +78,7 @@ int ver_cmp(const ver_t *a, const ver_t *b)
     }
     if (a->pre != b->pre)
         return a->pre ? -1 : 1;
+    if (a->post != b->post)
+        return a->post < b->post ? -1 : 1;
     return 0;
 }

@@ -13,6 +13,7 @@
 #include "tls_audit.h"
 
 #define HEADER_MAX 16384
+#define BODY_MAX (2u * 1024u * 1024u) /* home page or one script file */
 
 static void copy_str(char *dst, size_t n, const char *src)
 {
@@ -218,93 +219,125 @@ static void match_hits(const banner_tok *tok, int ntok, const adv_list *adv, pro
     }
 }
 
-int probe_one(const probe_target *t, const probe_opts *o, const adv_list *adv, probe_result *res)
+typedef struct {
+    int status;
+    char *buf;     /* whole answer, owned */
+    char *headers; /* after the status line, NUL-terminated at the empty line */
+    char *body;
+    size_t blen;
+} http_resp;
+
+/* "0\r\n\r\n"-style chunked body decoded in place; returns the new length */
+static size_t dechunk(char *b, size_t n)
 {
-    char port[8];
-    char req[512];
-    char buf[HEADER_MAX + 1];
-    size_t got = 0;
+    size_t in = 0, out = 0;
+
+    while (in < n) {
+        char *end, *nl;
+        unsigned long sz = strtoul(b + in, &end, 16);
+
+        if (end == b + in || (nl = memchr(end, '\n', n - (size_t)(end - b))) == NULL)
+            break;
+        in = (size_t)(nl - b) + 1;
+        if (sz == 0)
+            break;
+        if (sz > n - in)
+            sz = (unsigned long)(n - in);
+        memmove(b + out, b + in, sz);
+        out += sz;
+        in += sz;
+        if (in < n && b[in] == '\r')
+            in++;
+        if (in < n && b[in] == '\n')
+            in++;
+    }
+    b[out] = '\0';
+    return out;
+}
+
+/* One GET on a new connection (Connection: close), read until the server closes or max body
+   bytes. No Accept-Encoding, so the answer is never compressed. 0 when an HTTP answer was read. */
+static int http_get(const probe_target *t, const char *path, int timeout_ms, size_t max, http_resp *r,
+                    char *err, size_t errn, int *connected)
+{
+    char port[8], req[512], *eoh, *hdr;
+    size_t got = 0, cap = HEADER_MAX + max + 1;
     net_sock s;
     SSL_CTX *ctx = NULL;
     SSL *ssl = NULL;
-    banner_tok tok[PROBE_MAX_TOKENS];
-    int ntok, status = 0;
-    char *eoh;
-    const char *hdr;
+    char te[64], cl[32];
 
-    memset(res, 0, sizeof *res);
-    res->t = *t;
+    memset(r, 0, sizeof *r);
     snprintf(port, sizeof port, "%u", (unsigned)t->port);
     if (net_init() != 0) {
-        copy_str(res->error, sizeof res->error, "network init failed");
+        copy_str(err, errn, "network init failed");
         return -1;
     }
-    s = net_connect(t->host, port, o->timeout_ms, res->error, sizeof res->error);
+    s = net_connect(t->host, port, timeout_ms, err, errn);
     if (s == NET_BAD)
         return -1;
-    res->connected = 1;
-
+    *connected = 1;
     if (t->tls) {
         ctx = tls_new_client_ctx(NULL);
         if (ctx == NULL) {
-            copy_str(res->error, sizeof res->error, "cannot create TLS context");
+            copy_str(err, errn, "cannot create TLS context");
             net_close(s);
             return -1;
         }
-        ssl = tls_handshake(ctx, s, looks_like_ip(t->host) ? NULL : t->host, 0, res->error,
-                            sizeof res->error);
+        ssl = tls_handshake(ctx, s, looks_like_ip(t->host) ? NULL : t->host, 0, err, errn);
         if (ssl == NULL) {
             SSL_CTX_free(ctx);
             net_close(s);
             return -1;
         }
     }
-
     snprintf(req, sizeof req,
-             "HEAD / HTTP/1.1\r\nHost: %s\r\nUser-Agent: exposure-scanner (read-only check; "
+             "GET %s HTTP/1.1\r\nHost: %s\r\nUser-Agent: exposure-scanner (read-only check; "
              "+https://github.com/onlyilir/exposure-scanner)\r\nAccept: */*\r\nConnection: close\r\n\r\n",
-             t->host);
-    if (ssl != NULL ? SSL_write(ssl, req, (int)strlen(req)) <= 0
-                    : net_send_all(s, req, strlen(req)) != 0) {
-        copy_str(res->error, sizeof res->error, "send failed");
+             path, t->host);
+    if ((r->buf = malloc(cap)) == NULL) {
+        copy_str(err, errn, "out of memory");
         goto fail;
     }
-    while (got < HEADER_MAX) {
-        int r = ssl != NULL ? SSL_read(ssl, buf + got, (int)(HEADER_MAX - got))
-                            : net_recv(s, buf + got, HEADER_MAX - got);
-
-        if (r <= 0)
-            break;
-        got += (size_t)r;
-        buf[got] = '\0';
-        if (strstr(buf, "\r\n\r\n") != NULL || strstr(buf, "\n\n") != NULL)
-            break;
+    if (ssl != NULL ? SSL_write(ssl, req, (int)strlen(req)) <= 0 : net_send_all(s, req, strlen(req)) != 0) {
+        copy_str(err, errn, "send failed");
+        goto fail;
     }
-    buf[got] = '\0';
+    while (got + 1 < cap) {
+        size_t want = cap - 1 - got;
+        int n = ssl != NULL ? SSL_read(ssl, r->buf + got, want > 65536 ? 65536 : (int)want)
+                            : net_recv(s, r->buf + got, want > 65536 ? 65536 : want);
+
+        if (n <= 0)
+            break;
+        got += (size_t)n;
+    }
+    r->buf[got] = '\0';
     if (got == 0) {
-        copy_str(res->error, sizeof res->error, "no response");
+        copy_str(err, errn, "no response");
         goto fail;
     }
-    if (strncmp(buf, "HTTP/", 5) != 0 || sscanf(buf, "HTTP/%*d.%*d %d", &status) != 1) {
-        copy_str(res->error, sizeof res->error, "not an HTTP response");
+    if (strncmp(r->buf, "HTTP/", 5) != 0 || sscanf(r->buf, "HTTP/%*d.%*d %d", &r->status) != 1) {
+        copy_str(err, errn, "not an HTTP response");
         goto fail;
     }
-    res->status = status;
-    eoh = strchr(buf, '\n'); /* skip the status line */
-    hdr = eoh != NULL ? eoh + 1 : "";
-    web_header_value(hdr, "Server", res->server, sizeof res->server);
-    web_header_value(hdr, "X-Powered-By", res->powered_by, sizeof res->powered_by);
-    web_header_value(hdr, "Location", res->location, sizeof res->location);
-    ntok = http_parse_banners(hdr, tok, PROBE_MAX_TOKENS);
-    match_hits(tok, ntok, adv, res);
-    res->nweb = web_check_headers(hdr, t->tls, status, res->web, WEB_MAX_CHECKS);
-    web_apply_preload(t->host, res->web, res->nweb);
-    {
-        const char *pf = web_detect_platform(hdr, t->host);
-
-        copy_str(res->platform, sizeof res->platform, pf != NULL ? pf : "");
+    hdr = strchr(r->buf, '\n'); /* skip the status line */
+    hdr = hdr != NULL ? hdr + 1 : r->buf + got;
+    if ((eoh = strstr(hdr, "\r\n\r\n")) != NULL) {
+        r->body = eoh + 4;
+        eoh[2] = '\0';
+    } else if ((eoh = strstr(hdr, "\n\n")) != NULL) {
+        r->body = eoh + 2;
+        eoh[1] = '\0';
+    } else {
+        r->body = r->buf + got; /* headers only (cut short) */
     }
-
+    r->headers = hdr;
+    r->blen = (size_t)(r->buf + got - r->body);
+    if (web_header_value(hdr, "Transfer-Encoding", te, sizeof te) && strstr(te, "chunked") != NULL)
+        r->blen = dechunk(r->body, r->blen);
+    else if (web_header_value(hdr, "Content-Length", cl, sizeof cl) && strtoul(cl, NULL, 10) < r->blen)
+        r->body[r->blen = strtoul(cl, NULL, 10)] = '\0';
     if (ssl != NULL) {
         SSL_shutdown(ssl);
         SSL_free(ssl);
@@ -314,12 +347,83 @@ int probe_one(const probe_target *t, const probe_opts *o, const adv_list *adv, p
     return 0;
 
 fail:
+    free(r->buf);
+    r->buf = NULL;
     if (ssl != NULL) {
         SSL_free(ssl);
         SSL_CTX_free(ctx);
     }
     net_close(s);
     return -1;
+}
+
+static int still_wanted(const tech_list *l, const http_resp *home, const char *path)
+{
+    char paths[TECH_MAX_FOLLOWUPS][192];
+    int n = tech_followups(l, home->body, home->blen, paths, TECH_MAX_FOLLOWUPS), i;
+
+    for (i = 0; i < n; i++)
+        if (strcmp(paths[i], path) == 0)
+            return 1;
+    return 0;
+}
+
+/* Level 2: a few public files for what the home page showed, until each version is exact */
+static void follow_up(const probe_target *t, const probe_opts *o, const http_resp *home, probe_result *res)
+{
+    char paths[TECH_MAX_FOLLOWUPS][192];
+    int n = tech_followups(&res->tech, home->body, home->blen, paths, TECH_MAX_FOLLOWUPS), i;
+
+    for (i = 0; i < n; i++) {
+        http_resp f;
+        char err[96];
+        int c = 0;
+
+        if (!still_wanted(&res->tech, home, paths[i]))
+            continue;
+        if (o->rate_ms > 0)
+            net_sleep_ms(o->rate_ms);
+        res->fetched++;
+        if (http_get(t, paths[i], o->timeout_ms, BODY_MAX, &f, err, sizeof err, &c) == 0) {
+            tech_apply(paths[i], f.status, f.body, f.blen, &res->tech);
+            free(f.buf);
+        }
+    }
+}
+
+int probe_one(const probe_target *t, const probe_opts *o, const adv_list *adv, probe_result *res)
+{
+    banner_tok tok[PROBE_MAX_TOKENS];
+    int ntok;
+    const char *hdr;
+    http_resp r;
+
+    memset(res, 0, sizeof *res);
+    res->t = *t;
+    if (http_get(t, "/", o->timeout_ms, BODY_MAX, &r, res->error, sizeof res->error, &res->connected) != 0)
+        return -1;
+    res->status = r.status;
+    hdr = r.headers;
+    web_header_value(hdr, "Server", res->server, sizeof res->server);
+    web_header_value(hdr, "X-Powered-By", res->powered_by, sizeof res->powered_by);
+    web_header_value(hdr, "Location", res->location, sizeof res->location);
+    ntok = http_parse_banners(hdr, tok, PROBE_MAX_TOKENS);
+    match_hits(tok, ntok, adv, res);
+    res->nweb = web_check_headers(hdr, t->tls, r.status, res->web, WEB_MAX_CHECKS);
+    web_apply_preload(t->host, res->web, res->nweb);
+    {
+        const char *pf = web_detect_platform(hdr, t->host);
+
+        copy_str(res->platform, sizeof res->platform, pf != NULL ? pf : "");
+    }
+    tech_from_headers(hdr, &res->tech);
+    if (r.status == 200 && r.blen > 0) {
+        tech_from_html(r.body, r.blen, &res->tech);
+        if (o->level2)
+            follow_up(t, o, &r, res);
+    }
+    free(r.buf);
+    return 0;
 }
 
 /* ---------- thread pool with a shared rate limit ---------- */
