@@ -520,8 +520,21 @@ static int next_version(const char *body, size_t len, char *out, size_t n)
         p += 26;
     else if ((p = ci_find(body, len, "version:()=>")) != NULL)
         p += 12;
-    if (p == NULL)
+    if (p == NULL) {
+        /* Next.js 12: exports.version = "12.3.4" (minified t.version="..."), only trusted in the
+           file that also sets window.next, so another library's version is never taken */
+        const char *q;
+
+        if (ci_find(body, len, "window.next={version:") == NULL)
+            return 0;
+        for (q = body; (q = ci_find(q, len - (size_t)(q - body), ".version=\"")) != NULL; q += 10) {
+            read_ver(q + 10, out, n);
+            if (dots(out) >= 2 && atoi(out) >= 9)
+                return 1;
+        }
+        out[0] = '\0';
         return 0;
+    }
     while ((isalnum((unsigned char)p[il]) || p[il] == '_' || p[il] == '$') && il + 3 < sizeof ident) {
         ident[il] = p[il];
         il++;

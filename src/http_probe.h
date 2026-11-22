@@ -66,6 +66,10 @@ int probe_parse_target(const char *arg, probe_target *t);
    block. Returns the count (<= max). */
 int http_parse_banners(const char *headers, banner_tok *out, int max);
 
+/* Decodes a "Transfer-Encoding: chunked" body in place (b must be NUL-terminated at n); returns the
+   decoded length. Stops at the last chunk, a malformed size line or the end of the data. */
+size_t http_dechunk(char *b, size_t n);
+
 /* GET / (the home page, read up to 2 MB), plus up to TECH_MAX_FOLLOWUPS public files when
    o->level2 is set. Always fills res; returns 0 when the home page answered. */
 int probe_one(const probe_target *t, const probe_opts *o, const adv_list *adv, probe_result *res);

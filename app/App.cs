@@ -32,14 +32,14 @@ using Microsoft.Win32;
 [assembly: AssemblyProduct("Exposure Scanner")]
 [assembly: AssemblyCompany("onlyilir")]
 [assembly: AssemblyCopyright("Copyright (c) 2026 onlyilir. MIT License.")]
-[assembly: AssemblyVersion("0.10.0.0")]
-[assembly: AssemblyFileVersion("0.10.0.0")]
+[assembly: AssemblyVersion("0.10.1.0")]
+[assembly: AssemblyFileVersion("0.10.1.0")]
 
 namespace ExposureScanner
 {
     static class Program
     {
-        public const string Version = "0.10.0";
+        public const string Version = "0.10.1";
         public const string AppName = "Exposure Scanner";
         public const string ExeName = "ExposureScanner.exe";
         public const string RepoUrl = "https://github.com/onlyilir/exposure-scanner";

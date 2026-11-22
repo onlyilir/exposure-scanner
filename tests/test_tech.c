@@ -152,6 +152,18 @@ static void test_html_and_followups(void)
     t = find(&l, "nextjs");
     CHECK(t && strcmp(t->version, "14.2.3") == 0, "Pages Router version through the getter");
 
+    /* Next.js 12 (seen in a real 12.3.4 build): t.version="12.3.4" next to window.next={version:n.version} */
+    memset(&l, 0, sizeof l);
+    tech_from_html(pages, strlen(pages), &l);
+    tech_apply(paths[0], 200, "x.version=\"3.1.0\";k=r(745);t.version=\"12.3.4\",t.router=p;"
+               "window.next={version:n.version,get router(){return n.router}}", 120, &l);
+    t = find(&l, "nextjs");
+    CHECK(t && strcmp(t->version, "12.3.4") == 0, "Next.js 12 exports.version, other version strings skipped");
+    memset(&l, 0, sizeof l);
+    tech_from_html(pages, strlen(pages), &l);
+    tech_apply(paths[0], 200, "lib.version=\"12.3.4\";", 21, &l);
+    CHECK(find(&l, "nextjs")->version[0] == '\0', "a .version string without window.next is not taken");
+
     memset(&l, 0, sizeof l);
     tech_from_html(DRUPAL10, strlen(DRUPAL10), &l);
     t = find(&l, "drupal");
@@ -197,6 +209,8 @@ static const char DATA[] =
     "V\twordpress\tCVE-2017-1001000\thigh\t7.5\t0\t=4.7.0;=4.7.1\t-\thttps://nvd.nist.gov/x\tREST API content injection\n"
     "V\tnextjs\tGHSA-9qr9-h5gf-34mp\tcritical\t-\t0\t>=15.5.0-canary.0,<15.5.7;>=16.0.0-canary.0,<16.0.7\t15.5.7,16.0.7\t"
     "https://osv.dev/vulnerability/GHSA-9qr9-h5gf-34mp\tRCE in React flight protocol\n"
+    "V\twordpress\tCVE-2019-17669\tcritical\t9.8\t0\t<5.2.4\t5.2.4\thttps://nvd.nist.gov/x\tunbounded NVD range\n"
+    "S\twordpress\t4.9.35\toutdated\n"
     "S\twordpress\t7.0.1\tinsecure\n"
     "S\twordpress\t7.1.4\tlatest\n"
     "E\twordpress\t7.1\tno\t-\t7.1.4\n"
@@ -257,6 +271,17 @@ static void test_assess(void)
     t = item("wordpress", "4.7.1", TECH_EXACT, TECH_SITE, "");
     vdb_assess_item(&db, &t, &a);
     CHECK(a.nhole == 1 && a.fix_to[0] == '\0', "exact-version hole without a fixed bound");
+
+    /* WordPress backports fixes to older lines: "every version before 5.2.4" says nothing about 4.9.x */
+    t = item("wordpress", "5.2.0", TECH_EXACT, TECH_SITE, "");
+    vdb_assess_item(&db, &t, &a);
+    CHECK(a.nhole == 1 && strcmp(a.top[0].id, "CVE-2019-17669") == 0, "unbounded range counts on its own line");
+    t = item("wordpress", "4.9.30", TECH_EXACT, TECH_SITE, "");
+    vdb_assess_item(&db, &t, &a);
+    CHECK(a.nhole == 0, "unbounded range from a later line is skipped (backports)");
+    t = item("wordpress", "4.9.35", TECH_EXACT, TECH_SITE, "");
+    vdb_assess_item(&db, &t, &a);
+    CHECK(a.nhole == 0 && strcmp(a.wp_status, "outdated") == 0, "WordPress.org's outdated-but-patched verdict wins");
 
     t = item("nextjs", "15.5.4", TECH_EXACT, TECH_SITE, "");
     vdb_assess_item(&db, &t, &a);
@@ -491,6 +516,30 @@ static void test_since(void)
             still_wp = 1;
     }
     CHECK(new_os && still_wp, "new and still-open items flagged per issue");
+
+    /* a certificate problem (added after the website items) is compared too: 21 days then, 9 now */
+    {
+        tls_result tr;
+
+        if ((f = fopen(prev, "wb")) != NULL) {
+            fputs("recommended\tshop.example\tThe certificate expires in 21 days\n", f);
+            fclose(f);
+        }
+        memset(&tr, 0, sizeof tr);
+        snprintf(tr.host, sizeof tr.host, "shop.example");
+        tr.port = 443;
+        tr.connected = 1;
+        tr.ncerts = 1;
+        tr.certs[0].days_left = 9;
+        tr.certs[0].flags = TLSF_EXPIRES_SOON;
+        snprintf(tr.certs[0].not_after, sizeof tr.certs[0].not_after, "Nov 25 10:00:00 2026 GMT");
+        r.tls = &tr;
+        r.ntls = 1;
+        report_summarize(&r, &s);
+        CHECK(s.nfixed == 0 && s.nstill >= 1, "certificate issue still open, not counted as fixed");
+        r.tls = NULL;
+        r.ntls = 0;
+    }
 
     if ((f = fopen(html, "wb")) != NULL) {
         report_write_html(&r, &meta, f);

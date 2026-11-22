@@ -136,7 +136,8 @@ static int is_rec(const char *line, char type, const char *product)
 
 /* ---------- ranges ---------- */
 
-static int holds(const ver_t *v, const char *c, char *lt, size_t ltn)
+/* one bound; lt gets x of "<x", up gets x of "<x" or "<=x", *lower is set by ">=", ">" and "=" */
+static int holds(const ver_t *v, const char *c, char *lt, size_t ltn, char *up, size_t upn, int *lower)
 {
     ver_t b;
     int op, cmp;
@@ -152,6 +153,10 @@ static int holds(const ver_t *v, const char *c, char *lt, size_t ltn)
     cmp = ver_cmp(v, &b);
     if (op == 3)
         copy_str(lt, ltn, c);
+    if (op == 1 || op == 3)
+        copy_str(up, upn, c);
+    else
+        *lower = 1;
     switch (op) {
     case 0: return cmp >= 0;
     case 1: return cmp <= 0;
@@ -161,19 +166,24 @@ static int holds(const ver_t *v, const char *c, char *lt, size_t ltn)
     }
 }
 
-int vdb_range_match(const char *ranges, const char *version, char *fixed, size_t fixed_len)
+/* the matching alternative's upper bound and whether it has a lower one, for backport checks */
+static int range_match(const char *ranges, const char *version, char *fixed, size_t fixed_len,
+                       char *upper, size_t upper_len, int *bounded_below)
 {
     ver_t v;
     const char *p = ranges;
 
     if (fixed_len > 0)
         fixed[0] = '\0';
+    if (upper_len > 0)
+        upper[0] = '\0';
+    *bounded_below = 0;
     if (ver_parse(version, &v) != 0)
         return -1;
     while (*p != '\0') {
         size_t al = strcspn(p, ";");
-        char alt[512], lt[40] = "";
-        int ok = 1, any = 0;
+        char alt[512], lt[40] = "", up[40] = "";
+        int ok = 1, any = 0, lower = 0;
 
         if (al < sizeof alt) {
             char *c = alt;
@@ -187,12 +197,14 @@ int vdb_range_match(const char *ranges, const char *version, char *fixed, size_t
                 c[cl] = '\0';
                 if (cl > 0) {
                     any = 1;
-                    ok = holds(&v, c, lt, sizeof lt);
+                    ok = holds(&v, c, lt, sizeof lt, up, sizeof up, &lower);
                 }
                 c += cl + !last;
             }
             if (ok && any) {
                 copy_str(fixed, fixed_len, lt);
+                copy_str(upper, upper_len, up);
+                *bounded_below = lower;
                 return 1;
             }
         }
@@ -201,6 +213,28 @@ int vdb_range_match(const char *ranges, const char *version, char *fixed, size_t
             p++;
     }
     return 0;
+}
+
+int vdb_range_match(const char *ranges, const char *version, char *fixed, size_t fixed_len)
+{
+    char up[40];
+    int lower;
+
+    return range_match(ranges, version, fixed, fixed_len, up, sizeof up, &lower);
+}
+
+/* WordPress backports security fixes to its older release lines (4.7.39 has the fixes of
+   6.x). NVD often records only "every version before 5.2.4" though, so such an entry says
+   nothing about a version on an older line: it is skipped there. Entries that name the line
+   (">=4.9,<4.9.25") or the exact version still count. */
+static int backported_line(const char *product, const char *version, const char *upper, int bounded_below)
+{
+    ver_t v, u;
+
+    if (strcmp(product, "wordpress") != 0 || bounded_below || upper[0] == '\0' ||
+        ver_parse(version, &v) != 0 || ver_parse(upper, &u) != 0 || v.count < 2 || u.count < 2)
+        return 0;
+    return v.part[0] < u.part[0] || (v.part[0] == u.part[0] && v.part[1] < u.part[1]);
 }
 
 /* ---------- assessment ---------- */
@@ -249,15 +283,16 @@ static void holes(const vulndb *db, const char *product, const char *version, vd
 
     for (i = 0; i < db->n; i++) {
         const char *l = db->line[i];
-        char ranges[1024], fixed[40], sev[16], kev[4];
+        char ranges[1024], fixed[40], upper[40], sev[16], kev[4];
         vdb_hit h;
-        int j;
+        int j, lower;
 
         if (!is_rec(l, 'V', product))
             continue;
         a->known = 1;
         field(l, 6, ranges, sizeof ranges);
-        if (vdb_range_match(ranges, version, fixed, sizeof fixed) != 1)
+        if (range_match(ranges, version, fixed, sizeof fixed, upper, sizeof upper, &lower) != 1 ||
+            backported_line(product, version, upper, lower))
             continue;
         memset(&h, 0, sizeof h);
         field(l, 2, h.id, sizeof h.id);
@@ -509,6 +544,12 @@ void vdb_assess_item(const vulndb *db, const tech_item *t, vdb_assess *a)
                     break;
                 }
             }
+        /* WordPress.org's own verdict wins: "latest" and "outdated" have no open security hole */
+        if (t->conf == TECH_EXACT && (strcmp(a->wp_status, "latest") == 0 || strcmp(a->wp_status, "outdated") == 0)) {
+            a->nhole = a->nkev = 0;
+            a->worst = a->kev = a->ntop = 0;
+            a->fix_to[0] = '\0';
+        }
     }
     for (k = 0; k < sizeof eol_name / sizeof eol_name[0]; k++)
         if (strcmp(eol_name[k][0], t->product) == 0) {

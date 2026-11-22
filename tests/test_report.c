@@ -1227,19 +1227,59 @@ int main(int argc, char **argv)
         free(s);
         return ok ? 0 : 1;
     }
-    if (argc == 3 && strcmp(argv[1], "--sample-html") == 0) {
+    if (argc == 3 && (strcmp(argv[1], "--sample-html") == 0 || strcmp(argv[1], "--sample-monthly") == 0)) {
+        /* --sample-monthly: the same made-up site a month later, on the real security data
+           (data/vulndb.txt + data/os_map.txt in the current folder), with "since last month" */
+        int monthly = strcmp(argv[1], "--sample-monthly") == 0;
         scan_report r;
         probe_result pr[3];
         tls_result *tr = calloc(2, sizeof *tr);
-        report_meta m = {"Rosa's Bakery (sample)", "Your Name", "23 October 2026", 0};
+        report_meta m = {"Rosa's Bakery (sample)", "Your Name", monthly ? "16 November 2026" : "23 October 2026", monthly};
+        vulndb db;
         FILE *f = fopen(argv[2], "wb");
 
         if (tr == NULL || f == NULL)
             return 2;
         build_sample(&r, pr, tr);
+        memset(&db, 0, sizeof db);
+        if (monthly) {
+            FILE *s = fopen("tmp_sample_since.txt", "wb");
+            tech_item *t = pr[2].tech.t;
+
+            vdb_load(&db, "data/vulndb.txt");
+            vdb_load(&db, "data/os_map.txt");
+            vdb_set_today("2026-11-16");
+            memset(&pr[2].tech, 0, sizeof pr[2].tech);
+            snprintf(t[0].product, sizeof t[0].product, "wordpress");
+            snprintf(t[0].version, sizeof t[0].version, "7.0.1");
+            snprintf(t[0].source, sizeof t[0].source, "the site's RSS feed");
+            t[0].conf = TECH_EXACT;
+            t[0].flags = TECH_SITE;
+            snprintf(t[1].product, sizeof t[1].product, "apache");
+            snprintf(t[1].version, sizeof t[1].version, "2.4.41");
+            snprintf(t[1].source, sizeof t[1].source, "Server header");
+            snprintf(t[1].os, sizeof t[1].os, "ubuntu");
+            t[1].conf = TECH_EXACT;
+            t[1].flags = TECH_SERVER;
+            pr[2].tech.n = 2;
+            pr[2].fetched = 1;
+            if (s != NULL) {
+                fputs("important\trosas-bakery.example\tVisitors are not sent to the secure (https) version\n"
+                      "recommended\trosas-bakery.example\tThe certificate expires in 21 days\n"
+                      "important\trosas-bakery.example\tWordPress 7.0.1 has 4 known security holes, 4 used by attackers\n"
+                      "tip\trosas-bakery.example\tNo referrer policy is set\n", s);
+                fclose(s);
+            }
+            r.db = &db;
+            r.monthly = 1;
+            r.since_items = "tmp_sample_since.txt";
+            r.since_date = "16 October 2026";
+        }
         report_write_html(&r, &m, f);
         fclose(f);
         free(tr);
+        vdb_free(&db);
+        remove("tmp_sample_since.txt");
         printf("sample report written to %s\n", argv[2]);
         return 0;
     }

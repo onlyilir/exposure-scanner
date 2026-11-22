@@ -228,7 +228,7 @@ typedef struct {
 } http_resp;
 
 /* "0\r\n\r\n"-style chunked body decoded in place; returns the new length */
-static size_t dechunk(char *b, size_t n)
+size_t http_dechunk(char *b, size_t n)
 {
     size_t in = 0, out = 0;
 
@@ -335,7 +335,7 @@ static int http_get(const probe_target *t, const char *path, int timeout_ms, siz
     r->headers = hdr;
     r->blen = (size_t)(r->buf + got - r->body);
     if (web_header_value(hdr, "Transfer-Encoding", te, sizeof te) && strstr(te, "chunked") != NULL)
-        r->blen = dechunk(r->body, r->blen);
+        r->blen = http_dechunk(r->body, r->blen);
     else if (web_header_value(hdr, "Content-Length", cl, sizeof cl) && strtoul(cl, NULL, 10) < r->blen)
         r->body[r->blen = strtoul(cl, NULL, 10)] = '\0';
     if (ssl != NULL) {

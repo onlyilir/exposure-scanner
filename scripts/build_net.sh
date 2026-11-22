@@ -13,6 +13,7 @@ gcc $FL -O1 -o scantests.exe tests/test_scan.c $LIB
 gcc $FL -O1 -o nettests.exe tests/test_net.c src/advisory.c src/version.c $NET $LD
 gcc $FL -O1 -o reporttests.exe tests/test_report.c src/report.c src/report_html.c $LIB $NET $LD
 gcc $FL -O1 -o techtests.exe tests/test_tech.c src/report.c src/report_html.c $LIB $NET $LD
+gcc $FL -O1 -o accuracy_data.exe tests/accuracy_data.c src/vulndb.c src/version.c src/techdetect.c src/webcheck.c
 gcc $FL -O2 -o scanner.exe src/main.c src/report.c src/report_html.c $LIB $NET $LD
 set +e
 echo "== run =="
@@ -21,4 +22,5 @@ echo "== run =="
 ./nettests.exe data/advisories.txt 2>&1 | tail -8
 ./reporttests.exe data/advisories.txt 2>&1 | tail -12
 ./techtests.exe 2>&1 | tail -12
+./accuracy_data.exe data/vulndb.txt 2>&1 | tail -4
 SCANNER=./scanner.exe CHECKER=./reporttests.exe NETTESTS=./nettests.exe bash scripts/cli_check.sh

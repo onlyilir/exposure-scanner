@@ -432,6 +432,12 @@ static void site_item(model *m, int si, const tech_item *t)
             it->why = WHY_HOLES;
             update_advice(t, &a, it->fix, sizeof it->fix);
         }
+    } else if (strcmp(a.wp_status, "outdated") == 0) {
+        if ((it = add_item(m, WEB_TIP, si, "%s is on an older WordPress release line", label)) != NULL) {
+            setf(it->detail, sizeof it->detail, "WordPress.org still sends security fixes for it; seen in: %s", t->source);
+            setf(it->fix, sizeof it->fix, "Plan the update to the newest WordPress%s%s: older lines get security fixes "
+                 "only, and that can stop at any time.", a.newest[0] ? ", " : "", a.newest);
+        }
     } else if (a.known && a.eol != 1) {
         if ((it = add_item(m, WEB_OK, si, "%s: no known security holes", label)) != NULL)
             setf(it->detail, sizeof it->detail, "checked against the security data from %s; seen in: %s",
@@ -1245,10 +1251,10 @@ static int build_model(const scan_report *r, model *m)
     add_web_items(m);
     add_software(m);
     add_mail(m, r);
-    compare_since(m, r);
     for (i = 0; i < r->ntls; i++)
         add_tls(m, &r->tls[i]);
     add_code(m, r);
+    compare_since(m, r); /* last: every issue, certificate and code ones too, must be in the list */
     return m->intercepted + (m->failed_targets > 0) + m->unfinished + m->oom;
 }
 

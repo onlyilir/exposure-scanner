@@ -3,7 +3,7 @@
 #ifndef VERSION_INFO_H
 #define VERSION_INFO_H
 
-#define ES_VERSION_STR "0.10.0"
-#define ES_VERSION_NUM 0, 10, 0, 0
+#define ES_VERSION_STR "0.10.1"
+#define ES_VERSION_NUM 0, 10, 1, 0
 
 #endif

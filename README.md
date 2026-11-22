@@ -11,6 +11,7 @@ Free tools already cover each piece on its own (for example Mozilla's HTTP Obser
 It is read-only and defensive: it never logs in, attacks, guesses passwords or changes anything.
 
 [![Download](https://img.shields.io/badge/Download-Windows%20installer-4F46E5)](https://github.com/onlyilir/exposure-scanner/releases/latest)
+[![Website](https://img.shields.io/badge/Website-exposure--scanner.pages.dev-0F172A)](https://exposure-scanner.pages.dev)
 [![Buy me a coffee](https://img.shields.io/badge/Buy%20me%20a%20coffee-FFDD00?logo=buymeacoffee&logoColor=000)](https://buymeacoffee.com/only.ilir)
 [![License: MIT](https://img.shields.io/badge/License-MIT-0F172A)](LICENSE)
 
@@ -169,7 +170,9 @@ Secret values are never written, in text or JSON. Only a masked form appears, su
 
 ## Tests
 
-`scripts/build_net.sh` runs six test sets: version and advisory parsing, the folder scanners, the network modules (against servers the test starts on `127.0.0.1` only), the report, website-settings and HTML output, software detection with the security data, and command-line checks. The command-line checks use `127.0.0.1` port 1, where nothing listens, plus a local redirect server that `nettests --serve-redirect` starts on `127.0.0.1`. No request leaves the machine.
+Accuracy checks: `tests/accuracy_data.c` (run by `build_net.sh`) compares the security data with WordPress.org's own verdict for every WordPress version: its latest release and its patched older lines must get no hole, and every version it calls insecure should get a named one. `scripts/fuzz.sh` fuzzes everything that reads website or DNS data (headers, pages, follow-up files, chunked bodies, versions, security data lines, email records) with libFuzzer, AddressSanitizer and UBSan in the CLANG64 shell. Software detection was also checked against real Next.js builds (12.3.4, 13.5.6, 14.2.33, 15.5.4 and 16.4.6, App and Pages Router): every version was read exactly.
+
+`scripts/build_net.sh` runs seven test sets: version and advisory parsing, the folder scanners, the network modules (against servers the test starts on `127.0.0.1` only), the report, website-settings and HTML output, software detection with the security data, the accuracy checks above, and command-line checks. The command-line checks use `127.0.0.1` port 1, where nothing listens, plus a local redirect server that `nettests --serve-redirect` starts on `127.0.0.1`. No request leaves the machine.
 
 ## Privacy
 
